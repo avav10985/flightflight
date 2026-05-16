@@ -61,7 +61,6 @@ block(6.5, 4.5, 3.5, 4.5, 'ESP32 DevKit V1', [
     '         GPIO 26 → M2',
     '         GPIO 27 → M3',
     '         GPIO 14 → M4',
-    '         GPIO 13 → Buzz',
     '         GPIO 34 → BatADC',
 ], fill='#D5DBDB', edge=ESP32, title_color='white')
 
@@ -127,15 +126,10 @@ block(10.7, 3.4, 4.8, 1.7, 'ESC × 4 → 無刷馬達', [
     'ESC 紅線(5V)不接 ESP32，只接訊號+GND',
 ], fill='#D1F2EB', edge=MOTOR, title_color=MOTOR)
 
-# Buzzer + Battery ADC
-block(10.7, 1.7, 2.3, 1.5, '蜂鳴器', [
-    '+ → GPIO 13',
-    '− → GND',
-], fill='#FFF5D7', edge='#B7950B', title_color='#B7950B')
-
-block(13.2, 1.7, 2.3, 1.5, '電池電壓監測', [
+# Battery ADC
+block(10.7, 1.7, 4.8, 1.5, '電池電壓監測', [
     '電池+ ─30kΩ─┬─10kΩ─GND',
-    '            ├ GPIO 34',
+    '            └ GPIO 34',
 ], fill='#FFF5D7', edge='#B7950B', title_color='#B7950B')
 
 # ===== Power section (bottom) =====
@@ -163,9 +157,8 @@ wire(10.7, 8.3, 10, 7.5, color=COMM, lw=1.3)         # NRF24
 wire(10.7, 6.3, 10, 6.5, color=COMM, lw=1.3)         # GPS
 wire(10.7, 4.3, 10, 5.0, color=MOTOR, lw=1.3)        # ESC
 
-# Buzzer / ADC
-wire(11.8, 3.2, 9.5, 4.5, color='#B7950B', lw=1.1)
-wire(14.3, 3.2, 9.5, 4.5, color='#B7950B', lw=1.1)
+# ADC
+wire(13, 3.2, 9.5, 4.5, color='#B7950B', lw=1.1)
 
 # Power → ESP32
 wire(6.85, 3.0, 6.85, 4.5, color=POWER, lw=2.2, label='5V → VIN')

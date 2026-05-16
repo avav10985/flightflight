@@ -27,7 +27,6 @@
 #define PIN_ESC2     26   // M2 前右 CCW
 #define PIN_ESC3     27   // M3 後左 CCW
 #define PIN_ESC4     14   // M4 後右 CW
-#define PIN_BUZZER   13
 #define PIN_SDA      21
 #define PIN_SCL      22
 
@@ -105,10 +104,8 @@ void checkArm() {
   // aux1 = 0 → disarm
   if (data.aux1 == 1 && data.throttle < 20 && !armed) {
     armed = true;
-    tone(PIN_BUZZER, 2000, 200);
   } else if (data.aux1 == 0 && armed) {
     armed = false;
-    tone(PIN_BUZZER, 500, 200);
   }
 }
 
@@ -132,7 +129,6 @@ void debugPrint() {
 // ============================================================
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_BUZZER, OUTPUT);
 
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);
@@ -160,7 +156,6 @@ void setup() {
   radio.startListening();
 
   resetData();
-  tone(PIN_BUZZER, 1500, 100);
   Serial.println("Drone Ready (disarmed)");
 }
 

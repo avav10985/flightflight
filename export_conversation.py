@@ -2,14 +2,22 @@
 把 Claude Code 對話 (JSONL) 轉成 Markdown 檔
 
 用法：
-    python export_conversation.py <jsonl檔路徑> [輸出檔名.md]
+    python export_conversation.py <jsonl檔路徑> [輸出檔名.md] [--clean]
+
+選項：
+    --clean    去除工具呼叫、圖片佔位符、IDE 訊息、system-reminder 等雜訊
+               讓我之後讀紀錄時更有效率（只看真正的對話脈絡）
 
 範例：
-    python export_conversation.py "C:/Users/maxbb/.claude/projects/d--Algaeorithm-pilot-backend/8d23305e-c1c4-4d04-91da-2a20bda0de7c.jsonl"
+    python export_conversation.py session.jsonl 紀錄.md --clean
 """
 import json
+import re
 import sys
 from pathlib import Path
+
+# 全域旗標：是否啟用清潔模式
+CLEAN_MODE = False
 
 
 def extract_text(content):
@@ -23,14 +31,36 @@ def extract_text(content):
                 if item.get("type") == "text":
                     parts.append(item.get("text", ""))
                 elif item.get("type") == "tool_use":
-                    name = item.get("name", "?")
-                    parts.append(f"\n> 🔧 *[使用工具: {name}]*\n")
+                    if not CLEAN_MODE:
+                        name = item.get("name", "?")
+                        parts.append(f"\n> 🔧 *[使用工具: {name}]*\n")
                 elif item.get("type") == "tool_result":
-                    parts.append("\n> 📋 *[工具執行結果]*\n")
+                    if not CLEAN_MODE:
+                        parts.append("\n> 📋 *[工具執行結果]*\n")
                 elif item.get("type") == "image":
-                    parts.append("\n> 🖼️ *[圖片]*\n")
+                    if not CLEAN_MODE:
+                        parts.append("\n> 🖼️ *[圖片]*\n")
         return "\n".join(parts)
     return ""
+
+
+def strip_noise(text):
+    """清潔模式下移除 IDE / system 標籤包圍的雜訊段落。"""
+    if not CLEAN_MODE or not text:
+        return text
+    # 移除 <ide_opened_file>...</ide_opened_file>
+    text = re.sub(r"<ide_opened_file>.*?</ide_opened_file>", "", text, flags=re.DOTALL)
+    # 移除 <ide_selection>...</ide_selection>
+    text = re.sub(r"<ide_selection>.*?</ide_selection>", "", text, flags=re.DOTALL)
+    # 移除 <system-reminder>...</system-reminder>
+    text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
+    # 移除 <command-name>...</command-name>
+    text = re.sub(r"<command-name>.*?</command-name>", "", text, flags=re.DOTALL)
+    # 移除 <local-command-stdout>...</local-command-stdout> 等
+    text = re.sub(r"<local-command-[a-z]+>.*?</local-command-[a-z]+>", "", text, flags=re.DOTALL)
+    # 移除空白段落，但保留段落結構
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def should_skip(entry):
@@ -50,6 +80,11 @@ def should_skip(entry):
             # 跳過純粹的 system-reminder
             if content.startswith("<system-reminder>") and len(content) < 300:
                 return True
+            # 清潔模式：跳過 content 整段被剝光只剩雜訊的訊息
+            if CLEAN_MODE:
+                stripped = strip_noise(content)
+                if not stripped:
+                    return True
     return False
 
 
@@ -59,6 +94,7 @@ def format_message(entry):
     msg = entry.get("message", {})
     content = msg.get("content", "") if isinstance(msg, dict) else ""
     text = extract_text(content)
+    text = strip_noise(text)
 
     if not text.strip():
         return None
@@ -107,7 +143,13 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
 
-    jsonl_path = sys.argv[1]
-    md_path = sys.argv[2] if len(sys.argv) > 2 else Path(jsonl_path).with_suffix(".md").name
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+
+    if "--clean" in flags:
+        globals()["CLEAN_MODE"] = True
+
+    jsonl_path = args[0]
+    md_path = args[1] if len(args) > 1 else Path(jsonl_path).with_suffix(".md").name
 
     convert(jsonl_path, md_path)

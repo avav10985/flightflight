@@ -34,7 +34,6 @@
 #define PIN_ESC2        26   // M2 前右
 #define PIN_ESC3        27   // M3 後左
 #define PIN_ESC4        14   // M4 後右
-#define PIN_BUZZER      13
 #define PIN_BAT_ADC     34
 
 // ---------- I2C 地址 ----------
@@ -107,10 +106,6 @@ void tcaSelect(uint8_t ch) {
   Wire.beginTransmission(ADDR_TCA9548A);
   Wire.write(1 << ch);
   Wire.endTransmission();
-}
-
-void beep(uint16_t freq, uint16_t ms) {
-  tone(PIN_BUZZER, freq, ms);
 }
 
 void resetCommand() {
@@ -246,13 +241,11 @@ void recvCommand() {
         if (!armed && cmd.throttle < 10) {
           armed = true;
           tele.status |= 0x01;
-          beep(2000, 200);
         }
         break;
       case CMD_DISARM:
         armed = false;
         tele.status &= ~0x01;
-        beep(500, 200);
         break;
       default:
         break;
@@ -312,7 +305,6 @@ void printDebug() {
 // ============================================================
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_BUZZER, OUTPUT);
   pinMode(PIN_BAT_ADC, INPUT);
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -320,7 +312,6 @@ void setup() {
   Serial2.begin(9600, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
 
   resetCommand();
-  beep(1500, 100);
 
   Serial.println("\n=== Drone FC boot ===");
   Serial.printf("MPU6050: %s\n", initMPU() ? "OK" : "FAIL");
@@ -330,7 +321,6 @@ void setup() {
   initESC();
 
   Serial.println("Ready. ARM via NRF24 to spin motors.");
-  beep(2000, 100); delay(50); beep(2000, 100);
 }
 
 void loop() {
