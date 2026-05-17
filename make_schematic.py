@@ -181,8 +181,8 @@ MPU_SCL = mpu['R'][0]; MPU_SDA = mpu['R'][1]
 MPU_GND = mpu['R'][2]; MPU_VCC = mpu['R'][3]
 
 # I²C 連線
-wire(MPU_SDA, P_GPIO21, color=WIRE_I2C, lw=1.5, label='SDA')
-wire(MPU_SCL, P_GPIO22, color=WIRE_I2C, lw=1.5, label='SCL')
+wire(MPU_SDA, P_GPIO21, color=WIRE_I2C, lw=1.5, label='SDA → GPIO21')
+wire(MPU_SCL, P_GPIO22, color=WIRE_I2C, lw=1.5, label='SCL → GPIO22')
 
 # MPU 電源
 ax.plot([MPU_VCC[0], MPU_VCC[0] + 0.7], [MPU_VCC[1], MPU_VCC[1]], color=WIRE_PWR, linewidth=1.2)
@@ -204,12 +204,12 @@ NRF_CE  = nrf['L'][2]; NRF_CSN = nrf['L'][3]
 NRF_SCK = nrf['R'][0]; NRF_MOSI = nrf['R'][1]; NRF_MISO = nrf['R'][2]
 
 # SPI 連線 (CE/CSN 直接連到 ESP32 右側對應 pin)
-wire(NRF_CE, P_GPIO4, color=WIRE_SPI, lw=1.5, label='CE')
-wire(NRF_CSN, P_GPIO5, color=WIRE_SPI, lw=1.5, label='CSN')
+wire(NRF_CE, P_GPIO4, color=WIRE_SPI, lw=1.5, label='CE → GPIO4')
+wire(NRF_CSN, P_GPIO5, color=WIRE_SPI, lw=1.5, label='CSN → GPIO5')
 # SCK/MOSI/MISO 從 NRF 右側拉到上方再繞回 ESP32 右側
-wire(NRF_SCK, P_GPIO18, color=WIRE_SPI, lw=1.5, label='SCK', mid=(20.5, 13))
-wire(NRF_MOSI, P_GPIO23, color=WIRE_SPI, lw=1.5, label='MOSI', mid=(20.8, 13.4))
-wire(NRF_MISO, P_GPIO19, color=WIRE_SPI, lw=1.5, label='MISO', mid=(21.1, 13.8))
+wire(NRF_SCK, P_GPIO18, color=WIRE_SPI, lw=1.5, label='SCK → GPIO18', mid=(20.5, 13))
+wire(NRF_MOSI, P_GPIO23, color=WIRE_SPI, lw=1.5, label='MOSI → GPIO23', mid=(20.8, 13.4))
+wire(NRF_MISO, P_GPIO19, color=WIRE_SPI, lw=1.5, label='MISO → GPIO19', mid=(21.1, 13.8))
 
 # NRF24 電源（含 100μF 去耦電容）
 ax.plot([NRF_VCC[0] - 0.5, NRF_VCC[0]], [NRF_VCC[1], NRF_VCC[1]], color=WIRE_PWR, linewidth=1.2)
@@ -228,12 +228,12 @@ ground(NRF_GND[0] - 0.5, NRF_GND[1])
 # ESC × 4 (底部)
 # =================================================================
 esc_data = [
-    (1.5, 2, 'ESC1', 'M1 前左 CW',  P_GPIO25),
-    (6,   2, 'ESC2', 'M2 前右 CCW', P_GPIO26),
-    (14,  2, 'ESC3', 'M3 後左 CCW', P_GPIO27),
-    (18.5,2, 'ESC4', 'M4 後右 CW',  P_GPIO14),
+    (1.5, 2, 'ESC1', 'M1 前左 CW',  P_GPIO25, 'GPIO25'),
+    (6,   2, 'ESC2', 'M2 前右 CCW', P_GPIO26, 'GPIO26'),
+    (14,  2, 'ESC3', 'M3 後左 CCW', P_GPIO27, 'GPIO27'),
+    (18.5,2, 'ESC4', 'M4 後右 CW',  P_GPIO14, 'GPIO14'),
 ]
-for x, y, ref, motor, esp_pin in esc_data:
+for x, y, ref, motor, esp_pin, gpio_name in esc_data:
     esc = draw_ic(
         x=x, y=y, w=3, h=1.5,
         name=f'{ref}\n{motor}', ref=ref,
@@ -249,7 +249,7 @@ for x, y, ref, motor, esp_pin in esc_data:
                 fontsize=8, color=TEXT)
     # SIG 線連到 ESP32
     sig_x = x + 0.4
-    wire((sig_x, pin_y + 0.2), esp_pin, color=WIRE_PWM, lw=1.5, label='PWM')
+    wire((sig_x, pin_y + 0.2), esp_pin, color=WIRE_PWM, lw=1.5, label=f'SIG → {gpio_name}')
     # + 接 +11.1V (動力)
     pwr_x = x + 0.4 + 1.05
     ax.plot([pwr_x, pwr_x], [pin_y + 0.2, pin_y + 0.6], color=WIRE_PWR, linewidth=1.5)
@@ -274,7 +274,7 @@ resistor(batt_x, mid_y, length=1.0, label='R2 10kΩ')
 ax.plot([batt_x, batt_x], [mid_y - 1.0, mid_y - 1.3], color=WIRE_GND, linewidth=1.2)
 ground(batt_x, mid_y - 1.3)
 # 中點接 GPIO34
-wire((batt_x, mid_y), P_GPIO34, color='#27AE60', lw=1.5, label='VBAT/4')
+wire((batt_x, mid_y), P_GPIO34, color='#27AE60', lw=1.5, label='中點 → GPIO34 (ADC)')
 
 # =================================================================
 # ESP32 電源

@@ -2,22 +2,28 @@
 把 Claude Code 對話 (JSONL) 轉成 Markdown 檔
 
 用法：
-    python export_conversation.py <jsonl檔路徑> [輸出檔名.md] [--clean]
+    python export_conversation.py <jsonl> [輸出.md] [--clean] [--since=YYYY-MM-DD HH:MM:SS]
 
 選項：
-    --clean    去除工具呼叫、圖片佔位符、IDE 訊息、system-reminder 等雜訊
-               讓我之後讀紀錄時更有效率（只看真正的對話脈絡）
+    --clean             去除工具呼叫、圖片佔位符、IDE 訊息、system-reminder 等雜訊
+    --since=<timestamp> 只匯出此時間之後的訊息（含等號之後的全部當參數）
+                        例：--since=2026-05-17T06:31:00
 
 範例：
+    # 完整 + 清潔模式
     python export_conversation.py session.jsonl 紀錄.md --clean
+
+    # 只匯出新訊息（避免重複）
+    python export_conversation.py session.jsonl 第4部分.md --clean --since=2026-05-18T01:00:00
 """
 import json
 import re
 import sys
 from pathlib import Path
 
-# 全域旗標：是否啟用清潔模式
+# 全域旗標
 CLEAN_MODE = False
+SINCE = None    # 字串，例如 "2026-05-17T06:31:00"
 
 
 def extract_text(content):
@@ -123,6 +129,11 @@ def convert(jsonl_path, md_path):
             continue
         if should_skip(entry):
             continue
+        # --since 過濾：跳過時間早於或等於 SINCE 的訊息
+        if SINCE:
+            ts = entry.get("timestamp", "")
+            if ts and ts[:19] <= SINCE[:19]:
+                continue
         formatted = format_message(entry)
         if formatted:
             messages.append(formatted)
@@ -148,6 +159,10 @@ if __name__ == "__main__":
 
     if "--clean" in flags:
         globals()["CLEAN_MODE"] = True
+
+    for f in flags:
+        if f.startswith("--since="):
+            globals()["SINCE"] = f[len("--since="):]
 
     jsonl_path = args[0]
     md_path = args[1] if len(args) > 1 else Path(jsonl_path).with_suffix(".md").name

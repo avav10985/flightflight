@@ -1,0 +1,6 @@
+# Ruview side project (not part of drone project)
+RuView-main/
+RuView-main.zip
+
+# Temp PDF preview artifacts
+_6ch_*.png
