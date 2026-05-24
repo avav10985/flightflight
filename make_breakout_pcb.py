@@ -295,7 +295,7 @@ out_specs = [
     (BY + 11.5, 'J5', 'OUT1 → ESP32 主控',  ['+5V', 'GND']),
     (BY + 9.5,  'J6', 'OUT2 → ESP32-CAM',  ['+5V', 'GND']),
     (BY + 7.5,  'J7', 'OUT3 → GPS 模組',    ['+5V', 'GND']),
-    (BY + 5.5,  'J8', 'OUT4 → 蜂鳴器',      ['+5V', 'GND']),
+    (BY + 5.5,  'J8', 'OUT4 → 預留',        ['+5V', 'GND']),
 ]
 for y, ref, txt, pins in out_specs:
     pin_header(OUT_X, y, pins, label=f'{ref}', orient='V', label_pos='right')

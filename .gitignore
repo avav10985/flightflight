@@ -4,3 +4,7 @@ RuView-main.zip
 
 # Temp PDF preview artifacts
 _6ch_*.png
+
+# Windows 截圖（未指定保留時不收入版本控制）
+未命名*.png
+螢幕擷取畫面*.png
