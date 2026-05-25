@@ -134,6 +134,16 @@ void checkArm() {
   }
 }
 
+void checkCalibrationTrigger() {
+  static byte lastAux2 = 0;
+  if (!armed && data.throttle < 5 &&
+      lastAux2 == 0 && data.aux2 == 1) {
+    Serial.println("\n[!] aux2 觸發校正");
+    calibrateGyro();
+  }
+  lastAux2 = data.aux2;
+}
+
 void writeMotors() {
   int us = armed ? map(data.throttle, 0, 255, 1000, 2000) : 1000;
   us = constrain(us, 1000, 2000);
@@ -194,6 +204,7 @@ void loop() {
   recvData();
   failsafe();
   checkArm();
+  checkCalibrationTrigger();
   readAttitude();
   writeMotors();
   debugPrint();

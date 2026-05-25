@@ -64,9 +64,9 @@ int16_t       rawAx, rawAy, rawAz, rawGx, rawGy, rawGz;
 float         gyroOffsetX = 0, gyroOffsetY = 0, gyroOffsetZ = 0;
 float         levelOffsetRoll = 0, levelOffsetPitch = 0;   // 水平基準（解決 MPU6050 沒裝水平）
 
-// ---- PID 增益（從 0 開始）----
-float Kp_rp = 0.0f, Ki_rp = 0.0f, Kd_rp = 0.0f;
-float Kp_y  = 0.0f, Ki_y  = 0.0f;
+// ---- PID 增益（從拘束測試調出來的值）----
+float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
+float Kp_y  = 1.5f, Ki_y  = 0.02f;
 
 const float I_LIMIT = 100.0f;
 const float MAX_ANGLE = 30.0f;       // ±30° 期望姿態
@@ -159,6 +159,17 @@ void checkArm() {
     armed = false;
     i_roll = i_pitch = i_yaw = 0;
   }
+}
+
+// aux2 觸發校正：0 → 1 邊緣 + disarmed + 油門 0 才生效
+void checkCalibrationTrigger() {
+  static byte lastAux2 = 0;
+  if (!armed && data.throttle < 5 &&
+      lastAux2 == 0 && data.aux2 == 1) {
+    Serial.println("\n[!] aux2 觸發校正（請保持飛機平放靜止）");
+    calibrateGyro();
+  }
+  lastAux2 = data.aux2;
 }
 
 void pidControl() {
@@ -315,6 +326,7 @@ void loop() {
   recvData();
   failsafe();
   checkArm();
+  checkCalibrationTrigger();
   readAttitude();
   pidControl();
   writeMotors();
