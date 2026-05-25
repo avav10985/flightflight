@@ -91,12 +91,13 @@ void readAttitude() {
   lastT = now;
   if (dt > 0.05f || dt <= 0) dt = 0.01f;
 
-  float accRoll  = atan2f(rawAy, rawAz) * 57.2958f;
-  float accPitch = atan2f(-rawAx, sqrtf((float)rawAy*rawAy + (float)rawAz*rawAz)) * 57.2958f;
+  // MPU6050 軸對齊修正：chip -Y 指向飛機正前方（chip 旋轉 180°）
+  float accRoll  = atan2f(-rawAy, rawAz) * 57.2958f;
+  float accPitch = atan2f(rawAx, sqrtf((float)rawAy*rawAy + (float)rawAz*rawAz)) * 57.2958f;
 
-  float gRoll  = gxCal / 131.0f;
-  float gPitch = gyCal / 131.0f;
-  yawRate      = gzCal / 131.0f;
+  float gRoll  = -gxCal / 131.0f;
+  float gPitch = -gyCal / 131.0f;
+  yawRate      =  gzCal / 131.0f;
 
   roll  = 0.98f * (roll  + gRoll  * dt) + 0.02f * accRoll;
   pitch = 0.98f * (pitch + gPitch * dt) + 0.02f * accPitch;
