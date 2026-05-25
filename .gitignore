@@ -8,3 +8,6 @@ _6ch_*.png
 # Windows 截圖（未指定保留時不收入版本控制）
 未命名*.png
 螢幕擷取畫面*.png
+
+# Claude Code 本機設定（會自動變動，不收進版本控制）
+.claude/settings.local.json
