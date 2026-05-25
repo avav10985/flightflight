@@ -110,11 +110,11 @@ void readAttitude() {
   lastT = now;
   if (dt > 0.05f || dt <= 0) dt = 0.01f;
 
-  // MPU6050 軸對齊修正：chip +Y 指向飛機正前方
-  float accRoll  = atan2f(-rawAx, rawAz) * 57.2958f;
+  // MPU6050 軸對齊修正：pitch 用 -Y、roll 用 +X
+  float accRoll  = atan2f(rawAx, rawAz) * 57.2958f;
   float accPitch = atan2f(-rawAy, sqrtf((float)rawAx*rawAx + (float)rawAz*rawAz)) * 57.2958f;
 
-  float gRoll  =  gyCal / 131.0f;
+  float gRoll  = -gyCal / 131.0f;
   float gPitch = -gxCal / 131.0f;
   yawRate      =  gzCal / 131.0f;
 
@@ -164,10 +164,8 @@ void pidControl() {
   float yawRateSet = (data.yaw   - 127) * (MAX_YAWRATE / 127.0f);
 
   // 軸對齊：D 項要用 drone 框架的角速度
-  //   drone roll rate  = +gy（drone X = chip +Y）
-  //   drone pitch rate = -gx（drone Y = chip -X）
-  float gxRate =  (rawGy - gyroOffsetY) / 131.0f;
-  float gyRate = -(rawGx - gyroOffsetX) / 131.0f;
+  float gxRate = -(rawGy - gyroOffsetY) / 131.0f;   // roll rate
+  float gyRate = -(rawGx - gyroOffsetX) / 131.0f;   // pitch rate
 
   // Roll
   float errR = rollSet - roll;
