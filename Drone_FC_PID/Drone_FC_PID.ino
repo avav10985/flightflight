@@ -62,6 +62,7 @@ unsigned long lastDbgTime = 0;
 float         roll = 0, pitch = 0, yawRate = 0;
 int16_t       rawAx, rawAy, rawAz, rawGx, rawGy, rawGz;
 float         gyroOffsetX = 0, gyroOffsetY = 0, gyroOffsetZ = 0;
+float         levelOffsetRoll = 0, levelOffsetPitch = 0;   // 水平基準（解決 MPU6050 沒裝水平）
 
 // ---- PID 增益（從 0 開始）----
 float Kp_rp = 0.0f, Ki_rp = 0.0f, Kd_rp = 0.0f;
@@ -75,20 +76,33 @@ float i_roll = 0, i_pitch = 0, i_yaw = 0;
 float rollOut = 0, pitchOut = 0, yawOut = 0;
 
 void calibrateGyro() {
-  Serial.println("[*] 校正陀螺儀中 (3 秒)，請別動飛機...");
+  Serial.println("[*] 校正陀螺儀 + 水平基準（3 秒），請把飛機平放...");
   const int N = 300;
   long sx = 0, sy = 0, sz = 0;
+  float sumRoll = 0, sumPitch = 0;
   int16_t ax, ay, az, gx, gy, gz;
   for (int i = 0; i < N; i++) {
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
     sx += gx; sy += gy; sz += gz;
+    // 同時計算靜態角度（用同樣的軸對齊公式）
+    sumRoll  += atan2f(ax, az) * 57.2958f;
+    sumPitch += atan2f(-ay, sqrtf((float)ax*ax + (float)az*az)) * 57.2958f;
     delay(5);
   }
   gyroOffsetX = sx / (float)N;
   gyroOffsetY = sy / (float)N;
   gyroOffsetZ = sz / (float)N;
-  Serial.printf("[*] 偏移: gx=%.1f gy=%.1f gz=%.1f\n",
+  levelOffsetRoll  = sumRoll  / N;
+  levelOffsetPitch = sumPitch / N;
+
+  // 重置 PID 與互補濾波狀態
+  roll = pitch = yawRate = 0;
+  i_roll = i_pitch = i_yaw = 0;
+
+  Serial.printf("[*] 陀螺儀偏移: gx=%.1f gy=%.1f gz=%.1f\n",
                 gyroOffsetX, gyroOffsetY, gyroOffsetZ);
+  Serial.printf("[*] 水平基準: R=%.2f° P=%.2f°（已扣除）\n",
+                levelOffsetRoll, levelOffsetPitch);
 }
 
 void resetData() {
@@ -111,8 +125,9 @@ void readAttitude() {
   if (dt > 0.05f || dt <= 0) dt = 0.01f;
 
   // MPU6050 軸對齊修正：pitch 用 -Y、roll 用 +X
-  float accRoll  = atan2f(rawAx, rawAz) * 57.2958f;
-  float accPitch = atan2f(-rawAy, sqrtf((float)rawAx*rawAx + (float)rawAz*rawAz)) * 57.2958f;
+  // 並扣除水平基準（解決 MPU6050 沒裝水平）
+  float accRoll  = atan2f(rawAx, rawAz) * 57.2958f - levelOffsetRoll;
+  float accPitch = atan2f(-rawAy, sqrtf((float)rawAx*rawAx + (float)rawAz*rawAz)) * 57.2958f - levelOffsetPitch;
 
   float gRoll  = -gyCal / 131.0f;
   float gPitch = -gxCal / 131.0f;
