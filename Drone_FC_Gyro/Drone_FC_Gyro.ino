@@ -59,14 +59,15 @@ void readAttitude() {
   lastT = now;
   if (dt > 0.05f || dt <= 0) dt = 0.01f;
 
-  // MPU6050 軸對齊修正：chip -Y 指向飛機正前方（chip 旋轉 180°）
-  //   drone_ax = -rawAx、drone_ay = -rawAy、drone_az = rawAz
-  //   drone_gx = -gxCal、drone_gy = -gyCal、drone_gz = gzCal
-  float accRoll  = atan2f(-rawAy, rawAz) * 57.2958f;
-  float accPitch = atan2f(rawAx, sqrtf((float)rawAy*rawAy + (float)rawAz*rawAz)) * 57.2958f;
+  // MPU6050 軸對齊修正：chip -Y 指向飛機正前方（chip 90° CCW 旋轉）
+  //   drone X 軸 = chip -Y 軸（前後）  →  drone_ax = -rawAy
+  //   drone Y 軸 = chip +X 軸（左右）  →  drone_ay =  rawAx
+  //   drone Z 軸 = chip +Z 軸（垂直）  →  drone_az =  rawAz
+  float accRoll  = atan2f(rawAx, rawAz) * 57.2958f;
+  float accPitch = atan2f(rawAy, sqrtf((float)rawAx*rawAx + (float)rawAz*rawAz)) * 57.2958f;
 
-  float gRoll  = -gxCal / 131.0f;
-  float gPitch = -gyCal / 131.0f;
+  float gRoll  = -gyCal / 131.0f;
+  float gPitch =  gxCal / 131.0f;
   yawRate      =  gzCal / 131.0f;
 
   roll  = 0.98f * (roll  + gRoll  * dt) + 0.02f * accRoll;
