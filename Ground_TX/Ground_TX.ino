@@ -1,17 +1,18 @@
 // ============================================================
-// 地面端發射器（給上面 Drone_FC_Gyro 配對使用）
+// 地面端發射器（四軸 Mode 2 佈局）
 //
-// 硬體：完全沿用你原本的 6_Channel_Transmitter 電路
+// 硬體：沿用原本的 6_Channel_Transmitter 電路
 //   - Arduino Nano
 //   - NRF24L01+PA/LNA: CE=D9, CSN=D10, SCK=D13, MOSI=D11, MISO=D12
-//   - 搖桿 1: VRy=A0, VRx=A1
-//   - 搖桿 2: VRy=A2, VRx=A3
-//   - 開關 SW1=D0, SW2=D3
+//   - 搖桿 1（左）: 上下=A0, 左右=A1
+//   - 搖桿 2（右）: 上下=A2, 左右=A3
+//   - 開關 SW1=D0(aux1 武裝), SW2=D3(aux2 校正)
 //
-// 與原版差異：
-//   - 加 INPUT_PULLUP 修正 D0/D3 浮接 bug（純軟體，不改電路）
-//   - 把 aux1/aux2 反相，按下=1 較直覺
-//   - 失聯時 TX 不關掉，飛機端會自己 failsafe
+// Mode 2 佈局：
+//   左搖桿：上下 = 油門 throttle、左右 = 偏航 yaw
+//   右搖桿：上下 = 俯仰 pitch、 左右 = 翻滾 roll
+//
+// ★ 方向不對就改下面 REV_xxx 的 true/false
 // ============================================================
 
 #include <SPI.h>
@@ -22,6 +23,13 @@ const uint64_t PIPE_OUT    = 0xABCDABCD71LL;
 const uint8_t  NRF_CHANNEL = 100;
 
 RF24 radio(9, 10);   // CE, CSN
+
+// ==== 方向反轉設定（測試後不對就改這裡）====
+const bool REV_THROTTLE = true;   // 油門：往上推 throttle 要增加
+const bool REV_YAW      = false;  // 左搖桿往右 = 機頭右轉
+const bool REV_PITCH    = true;   // 右搖桿往上 = 前進
+const bool REV_ROLL     = true;   // 右搖桿往右 = 右傾
+// ============================================
 
 struct Signal {
   byte throttle;
@@ -40,18 +48,21 @@ void resetData() {
   data.aux1 = data.aux2 = 0;
 }
 
-// 把搖桿讀值對應到 0~255，中間 = 128
-int borderMap(int val, int lower, int middle, int upper, bool reverse) {
-  val = constrain(val, lower, upper);
-  if (val < middle)
-    val = map(val, lower, middle, 0, 128);
-  else
-    val = map(val, middle, upper, 128, 255);
-  return reverse ? 255 - val : val;
+// 中心型控制（roll/pitch/yaw）：中間 = 128
+int centerMap(int val, bool reverse) {
+  val = constrain(val, 0, 1023);
+  int out = map(val, 0, 1023, 0, 255);
+  return reverse ? 255 - out : out;
+}
+
+// 油門（線性，非中心型）：0 ~ 255
+int throttleMap(int val, bool reverse) {
+  val = constrain(val, 0, 1023);
+  int out = map(val, 0, 1023, 0, 255);
+  return reverse ? 255 - out : out;
 }
 
 void setup() {
-  // 開關用 INPUT_PULLUP，按下對 GND → 讀到 0；放開 → 讀到 1
   pinMode(0, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
 
@@ -67,16 +78,16 @@ void setup() {
 }
 
 void loop() {
-  // 通道對應（同你原版設定）
-  data.roll     = borderMap(analogRead(A3), 0, 512, 1023, true );   // CH1
-  data.pitch    = borderMap(analogRead(A0), 0, 512, 1023, true );   // CH2
-  data.throttle = borderMap(analogRead(A2), 0, 340,  570, true );   // CH3 油門
-  data.yaw      = borderMap(analogRead(A1), 0, 512, 1023, false);   // CH4
+  // Mode 2 通道對應
+  data.throttle = throttleMap(analogRead(A0), REV_THROTTLE);  // 左搖桿 上下
+  data.yaw      = centerMap(analogRead(A1), REV_YAW);         // 左搖桿 左右
+  data.pitch    = centerMap(analogRead(A2), REV_PITCH);       // 右搖桿 上下
+  data.roll     = centerMap(analogRead(A3), REV_ROLL);        // 右搖桿 左右
 
-  // 開關：按下對 GND → digitalRead = LOW → 反相後 aux = 1
-  data.aux1 = !digitalRead(0);   // CH5
-  data.aux2 = !digitalRead(3);   // CH6
+  // 開關：按下對 GND → digitalRead = LOW → 反相後 = 1
+  data.aux1 = !digitalRead(0);   // 武裝
+  data.aux2 = !digitalRead(3);   // 校正
 
   radio.write(&data, sizeof(Signal));
-  delay(20);   // 約 50Hz 更新
+  delay(20);   // 約 50Hz
 }

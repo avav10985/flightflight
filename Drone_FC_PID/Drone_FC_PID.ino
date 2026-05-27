@@ -42,20 +42,39 @@
 #define PIN_ESC4     14   // M4 後右 CW
 #define PIN_SDA      21
 #define PIN_SCL      22
+#define PIN_BAT_ADC  34   // 電池分壓中點
 
 // ---- NRF24 設定 ----
 const uint64_t PIPE_IN     = 0xABCDABCD71LL;
 const uint8_t  NRF_CHANNEL = 100;
 
+// ---- 電池分壓 ----
+const float BAT_DIVIDER = 4.0f;   // (30k+10k)/10k
+
+// 地面 → 飛機（指令 + 參數）
 struct Signal {
   byte throttle, pitch, roll, yaw, aux1, aux2;
+  byte paramID;     // 0=無、1=Kp、2=Ki、3=Kd、4=Kp_y、5=Ki_y
+  float paramVal;   // 參數值
 };
+
+// 飛機 → 地面（ACK payload 回傳遙測）
+struct Telemetry {
+  int16_t  roll;        // 角度 ×10
+  int16_t  pitch;
+  int16_t  yawRate;
+  uint16_t battery_mV;  // 電壓 mV
+  uint8_t  status;      // bit0=armed
+  uint8_t  reserved;
+};   // 10 bytes
 
 RF24    radio(PIN_NRF_CE, PIN_NRF_CSN);
 MPU6050 mpu;
 Servo   esc1, esc2, esc3, esc4;
 
 Signal        data;
+Telemetry     tele;
+float         batteryV    = 0;
 bool          armed       = false;
 unsigned long lastRxTime  = 0;
 unsigned long lastDbgTime = 0;
@@ -109,6 +128,36 @@ void resetData() {
   data.throttle = 0;
   data.pitch = data.roll = data.yaw = 127;
   data.aux1 = data.aux2 = 0;
+  data.paramID = 0;
+  data.paramVal = 0;
+}
+
+// 讀電池電壓（分壓 → ADC）
+void readBattery() {
+  int raw = analogRead(PIN_BAT_ADC);
+  batteryV = raw * (3.3f / 4095.0f) * BAT_DIVIDER;
+}
+
+// 打包遙測（要回傳給地面）
+void buildTelemetry() {
+  tele.roll       = (int16_t)(roll * 10);
+  tele.pitch      = (int16_t)(pitch * 10);
+  tele.yawRate    = (int16_t)(yawRate * 10);
+  tele.battery_mV = (uint16_t)(batteryV * 1000);
+  tele.status     = armed ? 0x01 : 0x00;
+  tele.reserved   = 0;
+}
+
+// 套用地面傳來的參數
+void applyCommand() {
+  switch (data.paramID) {
+    case 1: Kp_rp = data.paramVal; Serial.printf(">> 收到 Kp=%.3f\n", Kp_rp); break;
+    case 2: Ki_rp = data.paramVal; Serial.printf(">> 收到 Ki=%.3f\n", Ki_rp); break;
+    case 3: Kd_rp = data.paramVal; Serial.printf(">> 收到 Kd=%.3f\n", Kd_rp); break;
+    case 4: Kp_y  = data.paramVal; Serial.printf(">> 收到 Kp_y=%.3f\n", Kp_y); break;
+    case 5: Ki_y  = data.paramVal; Serial.printf(">> 收到 Ki_y=%.3f\n", Ki_y); break;
+    default: break;
+  }
 }
 
 void readAttitude() {
@@ -139,8 +188,12 @@ void readAttitude() {
 
 void recvData() {
   while (radio.available()) {
+    // 收指令前先把遙測排進 ACK，等地面下次 write 過來就一起回傳
+    buildTelemetry();
+    radio.writeAckPayload(1, &tele, sizeof(tele));
     radio.read(&data, sizeof(Signal));
     lastRxTime = millis();
+    if (data.paramID != 0) applyCommand();   // 有帶參數就套用
   }
 }
 
@@ -274,9 +327,9 @@ void parseSerial() {
 void debugPrint() {
   if (millis() - lastDbgTime < 200) return;
   lastDbgTime = millis();
-  Serial.printf("R%6.1f P%6.1f Yr%6.1f | Thr%3d arm%d | PID r%+5.0f p%+5.0f y%+5.0f\n",
+  Serial.printf("R%6.1f P%6.1f Yr%6.1f | Thr%3d arm%d | Bat%.2fV | PID r%+5.0f p%+5.0f y%+5.0f\n",
                 roll, pitch, yawRate,
-                data.throttle, armed,
+                data.throttle, armed, batteryV,
                 rollOut, pitchOut, yawOut);
 }
 
@@ -306,17 +359,20 @@ void setup() {
   Serial.println("[3] ESC 初始化 1000µs");
   delay(2000);
 
+  pinMode(PIN_BAT_ADC, INPUT);
+
   radio.begin();
   radio.openReadingPipe(1, PIPE_IN);
   radio.setChannel(NRF_CHANNEL);
-  radio.setAutoAck(false);
+  radio.setAutoAck(true);          // 雙向必須 true
+  radio.enableAckPayload();        // 開啟 ACK 回傳遙測
   radio.setDataRate(RF24_250KBPS);
   radio.setPALevel(RF24_PA_MAX);
   radio.startListening();
-  Serial.println("[4] NRF24 listening");
+  Serial.println("[4] NRF24 listening（雙向 ACK 遙測已開）");
 
-  Serial.println("[5] PID 啟動（所有增益 = 0，等指令）");
-  Serial.println("    指令範例：kp 1.0、ki 0.02、kd 0.5、ypp 2.0、p、cal");
+  Serial.printf("[5] PID: Kp=%.2f Ki=%.3f Kd=%.2f | Yaw Kp=%.2f Ki=%.3f\n",
+                Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
 
   resetData();
   Serial.println("=== Ready (disarmed) ===\n");
@@ -328,6 +384,7 @@ void loop() {
   checkArm();
   checkCalibrationTrigger();
   readAttitude();
+  readBattery();
   pidControl();
   writeMotors();
   debugPrint();
