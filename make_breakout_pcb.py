@@ -190,38 +190,6 @@ def ceramic_cap(x, y, value='', ref=''):
             color=SILK, fontweight='bold', zorder=10)
 
 
-def led(x, y, ref=''):
-    """LED 指示燈（紅色 + 兩腳）"""
-    smt_pad(x - 0.25, y, w=0.25, h=0.25, pin1=True)  # 陽極
-    smt_pad(x + 0.25, y, w=0.25, h=0.25)             # 陰極
-    ax.add_patch(Circle((x, y), 0.22, facecolor='#E74C3C',
-                        edgecolor='#922B21', linewidth=0.8, zorder=8))
-    ax.add_patch(Circle((x, y), 0.16, facecolor='#FF6B5B',
-                        edgecolor='none', zorder=9))
-    # 高光
-    ax.add_patch(Circle((x - 0.06, y + 0.06), 0.05, facecolor='white',
-                        alpha=0.8, zorder=10))
-    ax.text(x, y - 0.45, 'PWR', ha='center', fontsize=6.5,
-            color=SILK, zorder=10)
-    ax.text(x, y + 0.4, ref, ha='center', fontsize=7.5,
-            color=SILK, fontweight='bold', zorder=10)
-
-
-def resistor(x, y, value='', ref=''):
-    """色環電阻（俯視長條 + 兩腳）"""
-    smt_pad(x - 0.4, y, w=0.25, h=0.25, pin1=True)
-    smt_pad(x + 0.4, y, w=0.25, h=0.25)
-    # 電阻本體（米色）
-    ax.add_patch(Rectangle((x - 0.3, y - 0.1), 0.6, 0.2,
-                           facecolor='#F5DEB3', edgecolor='#8B6F47',
-                           linewidth=0.7, zorder=8))
-    # 色環（5V → LED 限流電阻通常 1k Ω = 棕黑紅）
-    for col, dx in [('#8B4513', -0.18), ('#000', -0.12), ('#E74C3C', 0.05), ('#FFD700', 0.18)]:
-        ax.plot([x + dx, x + dx], [y - 0.1, y + 0.1], color=col, linewidth=2.5, zorder=9)
-    ax.text(x, y - 0.32, value, ha='center', fontsize=6.5,
-            color=SILK, zorder=10)
-    ax.text(x, y + 0.3, ref, ha='center', fontsize=7.5,
-            color=SILK, fontweight='bold', zorder=10)
 
 
 def trace(x1, y1, x2, y2, kind='5v', width=0.18):
@@ -273,7 +241,7 @@ for ey in ESC_Y[1:]:
             bbox=dict(boxstyle='round,pad=0.12', facecolor='#222',
                       edgecolor='#FFD700', linewidth=0.6))
 
-# ----- 濾波電容（C1 電解 + C2 陶瓷）+ LED 指示燈 -----
+# ----- 濾波電容（C1 電解 + C2 陶瓷）-----
 electrolytic_cap(BX + 7.5, BY + 7.5, value='100µF\n16V', ref='C1')
 ceramic_cap(BX + 9.5, BY + 7.5, value='0.1µF', ref='C2')
 
@@ -282,12 +250,6 @@ trace(BX + 7.1, BY + 6.8, BX + 7.1, BY + 2.0, kind='gnd', width=0.12)
 trace(BX + 7.9, BY + 6.8, BX + 7.9, BUS_5V_Y - 0.5, kind='5v', width=0.12)
 trace(BX + 9.1, BY + 7.5, BX + 9.1, BY + 2.0, kind='gnd', width=0.12)
 trace(BX + 9.9, BY + 7.5, BX + 9.9, BUS_5V_Y - 0.5, kind='5v', width=0.12)
-
-# LED 指示燈 + 限流電阻
-led(BX + 11.5, BY + 8.5, ref='D1')
-resistor(BX + 11.5, BY + 7.3, value='1kΩ', ref='R1')
-trace(BX + 11.5, BY + 7.0, BX + 11.5, BY + 2.0, kind='gnd', width=0.12)
-trace(BX + 11.5, BY + 8.7, BX + 11.5, BUS_5V_Y - 0.5, kind='5v', width=0.12)
 
 # ----- 右側：5V/GND 輸出排針（OUT1~OUT4）+ I²S 麥克風預留（OUT5）-----
 OUT_X = BX + BW - 1.6
@@ -348,7 +310,7 @@ ax.add_patch(Circle((OUT_X - 0.35, MIC_Y + 2.0), 0.08, color=SILK, zorder=11))
 legend_x, legend_y = 2.7, 0.75
 ax.text(legend_x, legend_y,
         '銅軌色：紅 = +5V    黑 = GND    暗綠 = 被綠漆覆蓋\n'
-        '材料清單：C1 = 100µF/16V 電解  ·  C2 = 0.1µF 陶瓷  ·  R1 = 1kΩ  ·  D1 = 紅 LED 3mm  ·  排針間距 2.54mm',
+        '材料清單：C1 = 100µF/16V 電解  ·  C2 = 0.1µF 陶瓷  ·  排針間距 2.54mm',
         fontsize=9.5, color='#222', va='center')
 
 plt.savefig('d:/無人機/flightflight/breakout_pcb.png',

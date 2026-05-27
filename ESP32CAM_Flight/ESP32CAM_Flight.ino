@@ -142,10 +142,48 @@ void handleRoot() {
     "<style>"
     "body{margin:0;background:#000;color:#fff;font-family:sans-serif;text-align:center;}"
     "img{max-width:100%;height:auto;}"
+    ".ctrl{padding:8px;background:#111;}"
+    "select,input{font-size:16px;margin:4px;}"
+    "label{margin:0 6px;}"
     "</style></head><body>"
+    "<div class='ctrl'>"
+    "<label>解析度</label>"
+    "<select id='fs' onchange=\"setv('framesize',this.value)\">"
+    "<option value='1'>QQVGA 160x120</option>"
+    "<option value='3'>HQVGA 240x176</option>"
+    "<option value='5' selected>QVGA 320x240</option>"
+    "<option value='7'>HVGA 480x320</option>"
+    "<option value='8'>VGA 640x480</option>"
+    "<option value='9'>SVGA 800x600</option>"
+    "</select>"
+    "<label>畫質</label>"
+    "<input type='range' min='10' max='40' value='12' "
+    "oninput=\"q.innerText=this.value;setv('quality',this.value)\">"
+    "<span id='q'>12</span>"
+    "<span style='color:#888'>（數字大=省頻寬=順）</span>"
+    "</div>"
     "<img src='/stream' />"
+    "<script>"
+    "function setv(v,x){fetch('/control?var='+v+'&val='+x);}"
+    "</script>"
     "</body></html>";
   server.send(200, "text/html", html);
+}
+
+// 即時調整相機參數（不用重燒）
+void handleControl() {
+  String var = server.arg("var");
+  int val = server.arg("val").toInt();
+  sensor_t* s = esp_camera_sensor_get();
+  if (!s) { server.send(500, "text/plain", "no sensor"); return; }
+
+  if (var == "framesize") {
+    s->set_framesize(s, (framesize_t)val);
+  } else if (var == "quality") {
+    s->set_quality(s, val);
+  }
+  Serial.printf("[ctrl] %s = %d\n", var.c_str(), val);
+  server.send(200, "text/plain", "OK");
 }
 
 void handleStream() {
@@ -215,6 +253,7 @@ void setup() {
   server.on("/",         HTTP_GET, handleRoot);
   server.on("/stream",   HTTP_GET, handleStream);
   server.on("/snapshot", HTTP_GET, handleSnapshot);
+  server.on("/control",  HTTP_GET, handleControl);
   server.begin();
   Serial.println("[+] HTTP server OK");
 
