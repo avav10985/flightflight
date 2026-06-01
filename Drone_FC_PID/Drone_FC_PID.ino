@@ -53,7 +53,9 @@ const float BAT_DIVIDER = 4.0f;   // (30k+10k)/10k
 
 // 地面 → 飛機（指令 + 參數）
 struct Signal {
-  byte throttle, pitch, roll, yaw, aux1, aux2;
+  byte throttle, pitch, roll, yaw;
+  byte mode;        // 0~8（00=校準/安全；01=手動自穩；02~08 預留未實作）
+  byte flags;       // bit0=校準觸發；其餘保留
   byte paramID;     // 0=無、1=Kp、2=Ki、3=Kd、4=Kp_y、5=Ki_y
   float paramVal;   // 參數值
 };
@@ -76,6 +78,7 @@ Signal        data;
 Telemetry     tele;
 float         batteryV    = 0;
 bool          armed       = false;
+bool          safetyReleased = false;   // 開機 LOCK：看到 mode 0 才解鎖
 unsigned long lastRxTime  = 0;
 unsigned long lastDbgTime = 0;
 float         roll = 0, pitch = 0, yawRate = 0;
@@ -127,7 +130,8 @@ void calibrateGyro() {
 void resetData() {
   data.throttle = 0;
   data.pitch = data.roll = data.yaw = 127;
-  data.aux1 = data.aux2 = 0;
+  data.mode  = 0;          // 失聯 → 安全模式
+  data.flags = 0;
   data.paramID = 0;
   data.paramVal = 0;
 }
@@ -205,24 +209,37 @@ void failsafe() {
   }
 }
 
-void checkArm() {
-  if (data.aux1 == 1 && data.throttle < 20 && !armed) {
-    armed = true;
-  } else if (data.aux1 == 0 && armed) {
-    armed = false;
-    i_roll = i_pitch = i_yaw = 0;
-  }
+// 目前只有 mode 1（手動自穩）已實作可飛；mode 2~8 視為未設定，一律拒武裝
+inline bool modeFlyable(byte m) { return m == 1; }
+
+void disarm() {
+  if (armed) { armed = false; i_roll = i_pitch = i_yaw = 0; }
 }
 
-// aux2 觸發校正：0 → 1 邊緣 + disarmed + 油門 0 才生效
+void checkArm() {
+  // 看到 mode 0（校準/安全）一次 → 解除開機 LOCK
+  if (data.mode == 0) safetyReleased = true;
+
+  // 未解鎖 / 安全模式 / 非可飛模式 → 強制 disarm
+  if (!safetyReleased || data.mode == 0 || !modeFlyable(data.mode)) {
+    disarm();
+    return;
+  }
+
+  // 已解鎖 + 可飛模式 + 油門在底 → arm
+  if (!armed && data.throttle < 20) armed = true;
+}
+
+// 校正：進入 mode 0（flags bit0 邊緣）+ disarmed + 油門 0 才生效
 void checkCalibrationTrigger() {
-  static byte lastAux2 = 0;
-  if (!armed && data.throttle < 5 &&
-      lastAux2 == 0 && data.aux2 == 1) {
-    Serial.println("\n[!] aux2 觸發校正（請保持飛機平放靜止）");
+  static byte lastCalFlag = 0;
+  byte calFlag = data.flags & 0x01;
+  if (!armed && data.mode == 0 && data.throttle < 5 &&
+      lastCalFlag == 0 && calFlag == 1) {
+    Serial.println("\n[!] mode 0 觸發校正（請保持飛機平放靜止）");
     calibrateGyro();
   }
-  lastAux2 = data.aux2;
+  lastCalFlag = calFlag;
 }
 
 void pidControl() {
@@ -327,9 +344,9 @@ void parseSerial() {
 void debugPrint() {
   if (millis() - lastDbgTime < 200) return;
   lastDbgTime = millis();
-  Serial.printf("R%6.1f P%6.1f Yr%6.1f | Thr%3d arm%d | Bat%.2fV | PID r%+5.0f p%+5.0f y%+5.0f\n",
+  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%d lock%d arm%d Thr%3d | Bat%.2fV | PID r%+5.0f p%+5.0f y%+5.0f\n",
                 roll, pitch, yawRate,
-                data.throttle, armed, batteryV,
+                data.mode, safetyReleased, armed, data.throttle, batteryV,
                 rollOut, pitchOut, yawOut);
 }
 
@@ -375,7 +392,7 @@ void setup() {
                 Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
 
   resetData();
-  Serial.println("=== Ready (disarmed) ===\n");
+  Serial.println("=== Ready (LOCKED：先把模式開關切到 00 解鎖) ===\n");
 }
 
 void loop() {
