@@ -10,4 +10,8 @@ _6ch_*.png
 螢幕擷取畫面*.png
 
 # Claude Code 本機設定（會自動變動，不收進版本控制）
-.claude/settings.local.json
+.claude/
+
+# WiFi 帳密等機密（本機保留，不進版本控制）
+secrets.h
+**/secrets.h

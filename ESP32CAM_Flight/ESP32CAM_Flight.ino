@@ -22,19 +22,27 @@
 
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WebServer.h>
+#include "secrets.h"   // WiFi 帳密（已 gitignore，不進 git）
 
-// ========== 你要改的兩行 ==========
-const char* WIFI_SSID = "你的熱點名稱";
-const char* WIFI_PASS = "你的熱點密碼";
-// 例如：
-// const char* WIFI_SSID = "MyPhone";
-// const char* WIFI_PASS = "12345678";
-// ===================================
+// ---- WiFi 帳密放在 secrets.h（已 gitignore，不進 git）----
+const char* WIFI_SSID = WIFI_SSID_VAL;
+const char* WIFI_PASS = WIFI_PASS_VAL;
 
-// ---- AP 備援設定（連不上熱點時使用）----
-const char* AP_SSID_FALLBACK = "DroneCAM_AP";
-const char* AP_PASS_FALLBACK = "12345678";
+// ---- AP 備援（連不上熱點時相機自己開的 WiFi，名稱隨意、非敏感）----
+const char* AP_SSID_FALLBACK = "DroneCAM";
+const char* AP_PASS_FALLBACK = "drone1234";
+
+// ========== 固定 IP ==========
+// 依 2026-05-30 實測的熱點網段（Gateway 10.160.190.99）設定。
+// ⚠️ Samsung 熱點每次重開可能換 10.x 網段，換了就要重設（見下方註解）。
+const bool USE_STATIC_IP = true;
+IPAddress STATIC_IP(10, 160, 190, 50);    // 固定後開 http://10.160.190.50
+IPAddress GATEWAY  (10, 160, 190, 99);    // 熱點本身
+IPAddress SUBNET   (255, 255, 255, 0);
+IPAddress DNS1     (8, 8, 8, 8);
+// =============================
 
 // ---- AI-Thinker ESP32-CAM 相機腳位 ----
 #define PWDN_GPIO_NUM     32
@@ -104,6 +112,12 @@ bool initCamera() {
 void connectWiFi() {
   Serial.printf("[*] 嘗試連到熱點 \"%s\"...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  if (USE_STATIC_IP) {
+    if (WiFi.config(STATIC_IP, GATEWAY, SUBNET, DNS1))
+      Serial.printf("[*] 固定 IP = %s\n", STATIC_IP.toString().c_str());
+    else
+      Serial.println("[!] 固定 IP 設定失敗，改用 DHCP");
+  }
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   unsigned long t0 = millis();
@@ -118,6 +132,9 @@ void connectWiFi() {
     wifiSTA = true;
     digitalWrite(LED_PIN, LOW);   // 持續亮（active low）
     Serial.printf("[+] 已連線！IP = %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[+] Gateway = %s  Subnet = %s\n",
+                  WiFi.gatewayIP().toString().c_str(),
+                  WiFi.subnetMask().toString().c_str());
     Serial.printf("[+] 訊號強度 RSSI = %d dBm\n", WiFi.RSSI());
   } else {
     Serial.println("[!] 連不到熱點，退回 AP 模式");
@@ -129,6 +146,12 @@ void connectWiFi() {
                   AP_SSID_FALLBACK,
                   WiFi.softAPIP().toString().c_str());
     Serial.printf("    密碼: %s\n", AP_PASS_FALLBACK);
+  }
+
+  // mDNS：用名字連，IP 變了也連得到 http://dronecam.local
+  if (MDNS.begin("dronecam")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[+] mDNS 啟動 → http://dronecam.local");
   }
 }
 
