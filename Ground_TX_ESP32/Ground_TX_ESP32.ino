@@ -1,59 +1,116 @@
 // ============================================================
-// 地面站發射器（38-pin ESP32 + LCD 2004A）
+// 地面站發射器 V2-A：ESP32-S3-N16R8 + MAR2406 並列 TFT
 //
 // 功能：
-//   - Mode 2 雙搖桿控制（油門/yaw/pitch/roll）
-//   - NRF24 雙向：送指令 + 收飛機遙測（ACK Payload）
-//   - LCD 2004A 顯示飛機狀態
-//   - 選單系統：用搖桿調 PID 參數，即時傳給飛機
+//   - 油門（左搖桿上下，拆彈簧）/ pitch / roll
+//   - yaw 由肩鍵 L / R（按著 = 固定 ±60°/s）
+//   - 兩個 3 段開關組 9 模式（mode = A×3 + B，00=校準/安全）
+//   - NRF24 雙向 ACK（送指令 + 收遙測）
+//   - MAR2406 並列 8-bit ILI9341 TFT 320×240 顯示模式/姿態/狀態
+//   - mode 0 按「OK」進選單，4 鈕電阻階梯調 PID
+//   - SD 卡與 NRF24 共用 SPI（V2-A 只 mount，未寫入）
 //
-// 硬體接線（38-pin ESP32）：
-//   搖桿 左上下(油門) → GPIO 34
-//   搖桿 左左右(yaw)  → GPIO 35
-//   搖桿 右上下(pitch)→ GPIO 32
-//   搖桿 右左右(roll) → GPIO 33
-//   開關 武裝 SW1     → GPIO 25（按下對 GND）
-//   開關 選單 SW2     → GPIO 26（按下對 GND）
-//   NRF24 CE=4 CSN=5 SCK=18 MOSI=23 MISO=19  VCC=3V3 +100µF
-//   LCD   SDA=21 SCL=22  VCC=5V
+// 硬體接線見 手把接線總表_V2.md（取代 V1 的 手把接線總表.md）。
 //
-// 操作：
-//   飛行模式：搖桿控飛機、LCD 顯示遙測
-//   按 SW2 → 進選單 → 左搖桿上下選項目、左右調值 → 再按 SW2 離開
+// 開發板：ESP32S3 Dev Module；USB CDC On Boot=Enabled；
+//          Flash=16MB；PSRAM=OPI PSRAM；Partition=16M with OTA。
+//
+// 函式庫：LovyanGFX（per-sketch config，下面 LGFX class）、RF24、SD、SPI。
+//
+// 飛機端 Drone_FC_PID 已改成新封包（mode/flags/paramID/paramVal），
+// 兩端必須同時重燒，封包對不上會收到亂碼。
 // ============================================================
 
 #include <SPI.h>
 #include <RF24.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <SD.h>
+#define LGFX_USE_V1
+#include <LovyanGFX.hpp>
 
-// ---- 腳位 ----
-#define PIN_NRF_CE   4
-#define PIN_NRF_CSN  5
-#define J_THROTTLE   34   // 左搖桿 上下
-#define J_YAW        35   // 左搖桿 左右
-#define J_PITCH      32   // 右搖桿 上下
-#define J_ROLL       33   // 右搖桿 左右
-#define SW_ARM       25   // 武裝開關
-#define SW_MENU      26   // 選單開關
+// ============================================================
+// LovyanGFX：MAR2406 並列 8-bit ILI9341（per-sketch 設定，免改 library）
+// ============================================================
+class LGFX : public lgfx::LGFX_Device {
+  lgfx::Panel_ILI9341 _panel_instance;
+  lgfx::Bus_Parallel8 _bus_instance;
+public:
+  LGFX() {
+    {
+      auto cfg = _bus_instance.config();
+      cfg.freq_write = 20000000;
+      cfg.pin_wr = 47;
+      cfg.pin_rd = -1;
+      cfg.pin_rs = 21;
+      cfg.pin_d0 = 11;
+      cfg.pin_d1 = 12;
+      cfg.pin_d2 = 13;
+      cfg.pin_d3 = 14;
+      cfg.pin_d4 = 15;
+      cfg.pin_d5 = 16;
+      cfg.pin_d6 = 17;
+      cfg.pin_d7 = 18;
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+    {
+      auto cfg = _panel_instance.config();
+      cfg.pin_cs   = 48;
+      cfg.pin_rst  = -1;   // 接 3V3 + 10k 上拉，省 GPIO
+      cfg.pin_busy = -1;
+      cfg.panel_width  = 240;
+      cfg.panel_height = 320;
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits  = 1;
+      cfg.readable  = false;     // RD 接 3V3，不讀
+      cfg.invert    = false;
+      cfg.rgb_order = false;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = false;
+      _panel_instance.config(cfg);
+    }
+    setPanel(&_panel_instance);
+  }
+};
+LGFX tft;
+
+// ---- 腳位（V2-A 已定案，見 手把V2_討論摘要.md §4）----
+#define J_THROTTLE   1
+#define J_PITCH      2
+#define J_ROLL       4
+#define SW_A         5
+#define SW_B         6
+#define MENU_BTN     7
+#define SHOULDER_L   8
+#define SHOULDER_R   9
+
+#define PIN_NRF_CE   41
+#define PIN_NRF_CSN  42
+#define PIN_SPI_SCK  38
+#define PIN_SPI_MOSI 39
+#define PIN_SPI_MISO 40
+#define PIN_SD_CS    0   // BOOT 腳，外部 10k 上拉到 3V3，開機 HIGH 安全
 
 // ---- 方向反轉（測試後不對就改）----
 const bool REV_THROTTLE = true;
-const bool REV_YAW      = false;
 const bool REV_PITCH    = true;
 const bool REV_ROLL     = true;
+// yaw 方向若相反，把 SHOULDER_L / SHOULDER_R 兩腳對調即可
 
 // ---- NRF24 ----
 const uint64_t PIPE_OUT    = 0xABCDABCD71LL;
 const uint8_t  NRF_CHANNEL = 100;
 
 RF24 radio(PIN_NRF_CE, PIN_NRF_CSN);
-LiquidCrystal_I2C lcd(0x27, 20, 4);   // 地址可能 0x27 或 0x3F
 
 // ---- 通訊結構（與飛機端一致）----
 struct Signal {
-  byte throttle, pitch, roll, yaw, aux1, aux2;
-  byte paramID;
+  byte throttle, pitch, roll, yaw;
+  byte mode;        // 0~8（00=校準/安全）
+  byte flags;       // bit0=校準觸發
+  byte paramID;     // 0=無、1=Kp…5=Ki_y
   float paramVal;
 };
 
@@ -62,163 +119,287 @@ struct Telemetry {
   int16_t  pitch;
   int16_t  yawRate;
   uint16_t battery_mV;
-  uint8_t  status;
+  uint8_t  status;      // bit0=armed
   uint8_t  reserved;
 };
 
 Signal    data;
 Telemetry tele;
-bool      teleOK = false;   // 有收到遙測
+bool      teleOK = false;
+bool      sdOK   = false;
 
-// ---- 選單 ----
-enum Mode { FLIGHT, MENU };
-Mode mode = FLIGHT;
+// ---- 模式名稱 ----
+const char* MODE_NAME[9] = {
+  "SAFE/CAL", "MANUAL", "ALT-HOLD", "POS-HOLD",
+  "RTL", "AUTO", "LAND", "HEADLESS", "RSVD"
+};
+const byte MAX_FLY_MODE = 1;   // 目前只有 mode 1 可飛；2~8 未設定
+
+// ---- 選單鈕 ----
+enum { BTN_NONE, BTN_PLUS, BTN_MINUS, BTN_OK, BTN_BACK };
+
+// ---- UI 狀態 ----
+enum UiState { UI_FLIGHT, UI_MENU };
+UiState ui = UI_FLIGHT;
 
 // PID 本地副本（開機與飛機預設一致）
 struct Param { const char* name; float val; float step; byte id; };
 Param params[] = {
-  { "Kp  ", 2.0f,  0.1f,  1 },
-  { "Ki  ", 0.02f, 0.005f, 2 },
-  { "Kd  ", 0.5f,  0.05f, 3 },
-  { "KpY ", 1.5f,  0.1f,  4 },
-  { "KiY ", 0.02f, 0.005f, 5 },
+  { "Kp ", 2.0f,  0.1f,   1 },
+  { "Ki ", 0.02f, 0.005f, 2 },
+  { "Kd ", 0.5f,  0.05f,  3 },
+  { "KpY", 1.5f,  0.1f,   4 },
+  { "KiY", 0.02f, 0.005f, 5 },
 };
 const int N_PARAM = 5;
 int menuCursor = 0;
 
-unsigned long lastLcdTime = 0;
+unsigned long lastDrawTime = 0;
 
 // ============================================================
+// 公用函式
+// ============================================================
 int centerMap(int raw, bool reverse) {
-  raw = constrain(raw, 0, 4095);          // ESP32 12-bit
+  raw = constrain(raw, 0, 4095);
   int out = map(raw, 0, 4095, 0, 255);
   return reverse ? 255 - out : out;
+}
+
+byte readSwitch3(int pin) {
+  int v = analogRead(pin);
+  if (v > 2730) return 0;   // 上
+  if (v < 1365) return 2;   // 下
+  return 1;                  // 中（開路分壓中點）
+}
+
+int readMenuBtn() {
+  int v = analogRead(MENU_BTN);
+  if (v > 3250) return BTN_PLUS;
+  if (v > 2415) return BTN_MINUS;
+  if (v > 1665) return BTN_OK;
+  if (v > 640)  return BTN_BACK;
+  return BTN_NONE;
+}
+
+void readInputs(byte mode) {
+  data.throttle = centerMap(analogRead(J_THROTTLE), REV_THROTTLE);
+  data.pitch    = centerMap(analogRead(J_PITCH),    REV_PITCH);
+  data.roll     = centerMap(analogRead(J_ROLL),     REV_ROLL);
+
+  // yaw 由肩鍵：L→42、R→212、都沒按/同時按→127（對應 ±60°/s）
+  bool yawL = (digitalRead(SHOULDER_L) == LOW);
+  bool yawR = (digitalRead(SHOULDER_R) == LOW);
+  data.yaw = (yawL && !yawR) ? 42 : (yawR && !yawL) ? 212 : 127;
+
+  data.mode = mode;
+
+  // 進入 mode 0 → 送一次校準旗標（持續 600ms 確保飛機收到 0→1 邊緣）
+  static byte lastMode = 255;
+  static unsigned long calHoldUntil = 0;
+  if (mode == 0 && lastMode != 0) calHoldUntil = millis() + 600;
+  lastMode = mode;
+  data.flags = (millis() < calHoldUntil) ? 0x01 : 0x00;
+}
+
+void handleMenuCursor() {
+  static unsigned long lastMove = 0;
+  if (millis() - lastMove < 250) return;
+  int p = centerMap(analogRead(J_PITCH), false);
+  if (p > 200) { menuCursor = (menuCursor + 1) % N_PARAM;            lastMove = millis(); }
+  if (p < 55)  { menuCursor = (menuCursor - 1 + N_PARAM) % N_PARAM;  lastMove = millis(); }
+}
+
+void handleMenuButton(int btn) {
+  if (btn == BTN_BACK) { ui = UI_FLIGHT; tft.fillScreen(TFT_BLACK); return; }
+  if (btn == BTN_PLUS)  params[menuCursor].val += params[menuCursor].step;
+  if (btn == BTN_MINUS) params[menuCursor].val -= params[menuCursor].step;
+  if (params[menuCursor].val < 0) params[menuCursor].val = 0;
+  // +/- /OK → 排好參數，交給主迴圈 write 帶給飛機
+  data.paramID  = params[menuCursor].id;
+  data.paramVal = params[menuCursor].val;
+}
+
+// ============================================================
+// TFT UI：static 一次畫底色 + dynamic 用 fg/bg 文字覆寫，幾乎無閃爍
+// ============================================================
+void drawFlightStatic() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0,   0, 320, 30, TFT_NAVY);     // 頂部標題列
+  tft.fillRect(0, 200, 320, 40, TFT_DARKGREY); // 底部狀態列
+}
+
+void drawFlightDynamic(byte mode) {
+  char buf[40];
+  bool armed = tele.status & 0x01;
+
+  // 頂部：模式 + ARM 狀態
+  tft.setTextFont(4);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setCursor(5, 2);
+  snprintf(buf, sizeof(buf), "M%d %-10s", mode, MODE_NAME[mode]);
+  tft.print(buf);
+
+  tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
+  tft.setCursor(230, 2);
+  tft.print(armed ? "ARMED" : " OFF ");
+
+  // 主體：可飛/未實作 切換時清一次
+  static byte lastBlock = 255;
+  byte block = (mode > MAX_FLY_MODE) ? 0 : 1;
+  if (block != lastBlock) {
+    tft.fillRect(0, 32, 320, 168, TFT_BLACK);
+    lastBlock = block;
+  }
+
+  tft.setTextFont(4);
+  if (mode > MAX_FLY_MODE) {
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(40, 100);
+    tft.print("MODE NOT SET");
+  } else {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    snprintf(buf, sizeof(buf), "R: %+6.1f deg ", tele.roll  / 10.0);
+    tft.setCursor(15,  50); tft.print(buf);
+    snprintf(buf, sizeof(buf), "P: %+6.1f deg ", tele.pitch / 10.0);
+    tft.setCursor(15,  90); tft.print(buf);
+    snprintf(buf, sizeof(buf), "Y: %+6.1f d/s ", tele.yawRate / 10.0);
+    tft.setCursor(15, 130); tft.print(buf);
+  }
+
+  // 底部：油門 / 電量 / 連線 / SD
+  tft.setTextFont(2);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  snprintf(buf, sizeof(buf), "Thr %3d%%  Bat %4.1fV  %-7s  %-2s ",
+           (int)(data.throttle * 100 / 255),
+           tele.battery_mV / 1000.0,
+           teleOK ? "Link OK" : "Link --",
+           sdOK ? "SD" : "  ");
+  tft.setCursor(5, 215);
+  tft.print(buf);
+}
+
+void drawMenuStatic() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0,   0, 320, 30, TFT_PURPLE);
+  tft.fillRect(0, 210, 320, 30, TFT_DARKGREY);
+
+  tft.setTextFont(4);
+  tft.setTextColor(TFT_WHITE, TFT_PURPLE);
+  tft.setCursor(70, 2);
+  tft.print("== PID SETUP ==");
+
+  tft.setTextFont(2);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  tft.setCursor(5, 218);
+  tft.print("Pitch:cursor  +/-:adj  OK:send  Back:exit");
+}
+
+void drawMenuDynamic() {
+  // 只重畫狀態變過的列（cursor 跳走 / 值改了），避免閃爍
+  static int   lastCursor = -1;
+  static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999 };
+  char buf[24];
+  const int rowH = 32;
+
+  for (int i = 0; i < N_PARAM; i++) {
+    bool sel    = (i == menuCursor);
+    bool wasSel = (i == lastCursor);
+    bool valChanged = (lastVal[i] != params[i].val);
+
+    if (sel != wasSel || valChanged || lastCursor == -1) {
+      int y = 40 + i * rowH;
+      uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
+      uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
+      tft.fillRect(0, y, 320, rowH, bg);
+      tft.setTextFont(4);
+      tft.setTextColor(fg, bg);
+      tft.setCursor(10, y + 4);
+      tft.print(sel ? ">" : " ");
+      tft.print(params[i].name);
+      tft.setCursor(180, y + 4);
+      snprintf(buf, sizeof(buf), "%7.3f", params[i].val);
+      tft.print(buf);
+      lastVal[i] = params[i].val;
+    }
+  }
+  lastCursor = menuCursor;
 }
 
 // ============================================================
 void setup() {
   Serial.begin(115200);
 
-  pinMode(SW_ARM, INPUT_PULLUP);
-  pinMode(SW_MENU, INPUT_PULLUP);
+  pinMode(SHOULDER_L, INPUT_PULLUP);
+  pinMode(SHOULDER_R, INPUT_PULLUP);
   analogReadResolution(12);
 
-  Wire.begin(21, 22);
-  lcd.init();
-  lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print(" Drone Ground St.");
-  lcd.setCursor(0, 1);
-  lcd.print(" NRF24 init...");
+  // TFT 先起來，方便顯示開機進度
+  tft.init();
+  tft.setRotation(1);   // 320×240 landscape
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(5, 5);
+  tft.print("Drone Ground Station V2-A");
+  tft.setCursor(5, 25);
+  tft.print("Init SPI / NRF24 / SD ...");
 
+  // SPI：NRF24 + SD 共用
+  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
+
+  // NRF24（關鍵連線，先起）
   radio.begin();
   radio.openWritingPipe(PIPE_OUT);
   radio.setChannel(NRF_CHANNEL);
-  radio.setAutoAck(true);        // 雙向必須 true
-  radio.enableAckPayload();      // 收飛機遙測
+  radio.setAutoAck(true);
+  radio.enableAckPayload();
   radio.setDataRate(RF24_250KBPS);
   radio.setPALevel(RF24_PA_MAX);
-  radio.stopListening();         // 發射端
+  radio.stopListening();
+  Serial.println("[+] NRF24 ready");
 
-  delay(500);
-  lcd.clear();
-  Serial.println("Ground Station Ready");
-}
-
-// ============================================================
-// 讀搖桿打包指令
-// ============================================================
-void readSticks() {
-  data.throttle = centerMap(analogRead(J_THROTTLE), REV_THROTTLE);
-  data.yaw      = centerMap(analogRead(J_YAW),      REV_YAW);
-  data.pitch    = centerMap(analogRead(J_PITCH),    REV_PITCH);
-  data.roll     = centerMap(analogRead(J_ROLL),     REV_ROLL);
-  data.aux1 = (digitalRead(SW_ARM) == LOW) ? 1 : 0;
-  data.aux2 = (digitalRead(SW_MENU) == LOW) ? 1 : 0;
-}
-
-// ============================================================
-// 選單導航（左搖桿）
-// ============================================================
-void handleMenu() {
-  static unsigned long lastMove = 0;
-  if (millis() - lastMove < 250) return;   // 防連跳
-
-  int yawRaw = centerMap(analogRead(J_YAW), false);     // 左右
-  int thrRaw = centerMap(analogRead(J_THROTTLE), false); // 上下
-
-  // 上下選項目
-  if (thrRaw > 200) { menuCursor = (menuCursor + 1) % N_PARAM; lastMove = millis(); }
-  if (thrRaw < 55)  { menuCursor = (menuCursor - 1 + N_PARAM) % N_PARAM; lastMove = millis(); }
-
-  // 左右調值
-  bool changed = false;
-  if (yawRaw > 200) { params[menuCursor].val += params[menuCursor].step; changed = true; lastMove = millis(); }
-  if (yawRaw < 55)  { params[menuCursor].val -= params[menuCursor].step; changed = true; lastMove = millis(); }
-  if (params[menuCursor].val < 0) params[menuCursor].val = 0;
-
-  // 改了就傳給飛機
-  if (changed) {
-    data.paramID  = params[menuCursor].id;
-    data.paramVal = params[menuCursor].val;
-    radio.write(&data, sizeof(Signal));
-    data.paramID = 0;   // 傳完清除
+  // SD（選用，沒卡也繼續）
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
+  if (SD.begin(PIN_SD_CS, SPI)) {
+    sdOK = true;
+    Serial.println("[+] SD mounted");
+  } else {
+    Serial.println("[*] SD missing or init failed (繼續)");
   }
-}
 
-// ============================================================
-// LCD 顯示
-// ============================================================
-void drawFlight() {
-  // 第1行：武裝 + 電量
-  lcd.setCursor(0, 0);
-  lcd.print(tele.status & 0x01 ? "ARM " : "OFF ");
-  lcd.printf("Bat:%4.1fV", tele.battery_mV / 1000.0);
-  lcd.print(teleOK ? "  OK" : " ---");
-
-  // 第2行：姿態
-  lcd.setCursor(0, 1);
-  lcd.printf("R:%5.1f P:%5.1f   ", tele.roll / 10.0, tele.pitch / 10.0);
-
-  // 第3行：yaw + 油門
-  lcd.setCursor(0, 2);
-  lcd.printf("Yaw:%5.1f Thr:%3d%% ", tele.yawRate / 10.0,
-             (int)(data.throttle * 100 / 255));
-
-  // 第4行：提示
-  lcd.setCursor(0, 3);
-  lcd.print("SW2=Menu          ");
-}
-
-void drawMenu() {
-  lcd.setCursor(0, 0);
-  lcd.print("== PID 設定 ==     ");
-  for (int i = 0; i < 3 && i < N_PARAM; i++) {
-    int idx = i;   // 顯示前 3 個（簡化）
-    lcd.setCursor(0, i + 1);
-    lcd.print(idx == menuCursor ? ">" : " ");
-    lcd.print(params[idx].name);
-    lcd.printf("%6.3f       ", params[idx].val);
-  }
+  delay(300);
+  drawFlightStatic();
+  Serial.println("Ground Station V2-A Ready");
 }
 
 // ============================================================
 void loop() {
-  readSticks();
+  byte mode = readSwitch3(SW_A) * 3 + readSwitch3(SW_B);
 
-  // SW2 邊緣切換選單
-  static byte lastMenuSw = 0;
-  byte menuSw = (digitalRead(SW_MENU) == LOW) ? 1 : 0;
-  if (lastMenuSw == 0 && menuSw == 1) {
-    mode = (mode == FLIGHT) ? MENU : FLIGHT;
-    lcd.clear();
-    delay(50);
-  }
-  lastMenuSw = menuSw;
+  // 按鈕單一邊緣偵測
+  int btn = readMenuBtn();
+  static int lastBtn = BTN_NONE;
+  bool btnEdge = (btn != lastBtn && btn != BTN_NONE);
+  lastBtn = btn;
 
-  if (mode == MENU) {
-    handleMenu();
+  // UI 狀態機
+  if (ui == UI_FLIGHT) {
+    if (btnEdge && mode == 0 && btn == BTN_OK) {
+      ui = UI_MENU;
+      drawMenuStatic();
+    }
+  } else {  // UI_MENU
+    if (mode != 0) {
+      ui = UI_FLIGHT;
+      drawFlightStatic();
+    } else {
+      handleMenuCursor();
+      if (btnEdge) handleMenuButton(btn);
+    }
   }
+
+  readInputs(mode);
 
   // 送指令 + 收遙測（ACK payload）
   if (radio.write(&data, sizeof(Signal))) {
@@ -227,14 +408,15 @@ void loop() {
       teleOK = true;
     }
   } else {
-    teleOK = false;   // 沒收到 ACK = 飛機沒回應
+    teleOK = false;
   }
+  data.paramID = 0;   // 參數送完清掉
 
-  // LCD 更新（每 150ms，不要太快）
-  if (millis() - lastLcdTime > 150) {
-    lastLcdTime = millis();
-    if (mode == FLIGHT) drawFlight();
-    else                drawMenu();
+  // TFT 更新（每 150ms）
+  if (millis() - lastDrawTime > 150) {
+    lastDrawTime = millis();
+    if (ui == UI_FLIGHT) drawFlightDynamic(mode);
+    else                 drawMenuDynamic();
   }
 
   delay(20);   // 約 50Hz
