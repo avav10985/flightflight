@@ -32,6 +32,13 @@
 #include <RF24.h>
 #include <MPU6050.h>
 #include <ESP32Servo.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+// ---- WiFi Debug AP(免線即時遙測:連 DroneDebug → 開 192.168.4.1)----
+const char* DBG_AP_SSID = "DroneDebug";
+const char* DBG_AP_PASS = "drone1234";
+WebServer dbgServer(80);
 
 // ---- 腳位 ----
 #define PIN_NRF_CE   4
@@ -280,6 +287,42 @@ void debugPrint() {
                 rollOut, pitchOut, yawOut);
 }
 
+// ============================================================
+// Debug HTTP:瀏覽器開 http://192.168.4.1 自動每 0.3 秒更新
+// ============================================================
+void handleDebugRoot() {
+  char buf[1200];
+  snprintf(buf, sizeof(buf),
+    "<!DOCTYPE html><html><head>"
+    "<meta http-equiv='refresh' content='0.3'>"
+    "<title>Drone Debug</title>"
+    "<style>body{font-family:monospace;font-size:18px;background:#111;color:#0f0;padding:20px;line-height:1.5}"
+    ".big{font-size:24px;color:#ff0}.armed{color:#f33;font-weight:bold}.safe{color:#888}</style>"
+    "</head><body><pre>"
+    "<span class='big'>Roll  : %+7.2f deg</span>\n"
+    "<span class='big'>Pitch : %+7.2f deg</span>\n"
+    "<span class='big'>YawRate: %+7.2f deg/s</span>\n\n"
+    "Throttle: %3d / 255    (PWM %d us)\n"
+    "ARMED: <span class='%s'>%s</span>\n\n"
+    "PID output:\n"
+    "  rollOut : %+8.2f\n"
+    "  pitchOut: %+8.2f\n"
+    "  yawOut  : %+8.2f\n\n"
+    "PID gains (R/P):  Kp=%.3f  Ki=%.3f  Kd=%.3f\n"
+    "PID gains (Yaw):  Kp=%.3f  Ki=%.3f\n\n"
+    "MAX_ANGLE: %.1f deg    MAX_YAWRATE: %.1f deg/s\n"
+    "</pre></body></html>",
+    roll, pitch, yawRate,
+    data.throttle, map(data.throttle, 0, 255, 1000, 2000),
+    armed ? "armed" : "safe",
+    armed ? "YES" : " NO",
+    rollOut, pitchOut, yawOut,
+    Kp_rp, Ki_rp, Kd_rp,
+    Kp_y, Ki_y,
+    MAX_ANGLE, MAX_YAWRATE);
+  dbgServer.send(200, "text/html", buf);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -318,6 +361,15 @@ void setup() {
   Serial.println("[5] PID 啟動（所有增益 = 0，等指令）");
   Serial.println("    指令範例：kp 1.0、ki 0.02、kd 0.5、ypp 2.0、p、cal");
 
+  // WiFi Debug AP(用 channel 1,離 NRF24 ch100 很遠不會干擾)
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(DBG_AP_SSID, DBG_AP_PASS, 1);
+  Serial.printf("[6] Debug AP \"%s\"(密碼 %s)IP=%s\n",
+                DBG_AP_SSID, DBG_AP_PASS, WiFi.softAPIP().toString().c_str());
+  dbgServer.on("/", handleDebugRoot);
+  dbgServer.begin();
+  Serial.println("    瀏覽器開 http://192.168.4.1 看即時遙測");
+
   resetData();
   Serial.println("=== Ready (disarmed) ===\n");
 }
@@ -332,4 +384,5 @@ void loop() {
   writeMotors();
   debugPrint();
   parseSerial();
+  dbgServer.handleClient();
 }
