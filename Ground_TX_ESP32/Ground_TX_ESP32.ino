@@ -1,24 +1,30 @@
 // ============================================================
-// 地面站發射器 V2-A：ESP32-S3-N16R8 + MAR2406 並列 TFT
+// 地面站發射器 V2-A:ESP32-S3-N16R8 + MSP2806 2.8" SPI TFT(直立)
 //
-// 功能：
-//   - 油門（左搖桿上下，拆彈簧）/ pitch / roll
-//   - yaw 由肩鍵 L / R（按著 = 固定 ±60°/s）
-//   - 兩個 3 段開關組 9 模式（mode = A×3 + B，00=校準/安全）
-//   - NRF24 雙向 ACK（送指令 + 收遙測）
-//   - MAR2406 並列 8-bit ILI9341 TFT 320×240 顯示模式/姿態/狀態
-//   - mode 0 按「OK」進選單，4 鈕電阻階梯調 PID
-//   - SD 卡與 NRF24 共用 SPI（V2-A 只 mount，未寫入）
+// 功能:
+//   - 油門(左搖桿上下,拆彈簧)/ pitch / roll
+//   - yaw 由肩鍵 L / R(按著 = 固定 ±60°/s)
+//   - 兩個 3 段開關組 9 模式(mode = A×3 + B,00=校準/安全)
+//   - NRF24 雙向 ACK(送指令 + 收遙測)
+//   - MSP2806 2.8" SPI ILI9341 TFT 240×320 直立顯示模式/姿態/狀態
+//     (跟 NRF24/SD 共用 SPI 匯流排,只佔 CS=48 + DC=21 兩隻獨立腳)
+//   - mode 0 按「OK」進選單,4 鈕電阻階梯調 PID
+//   - SD 卡與 NRF24 共用 SPI(V2-A 只 mount,未寫入)
 //
-// 硬體接線見 手把接線總表_V2.md（取代 V1 的 手把接線總表.md）。
+// 硬體接線見 手把接線總表_V2.md。
 //
-// 開發板：ESP32S3 Dev Module；USB CDC On Boot=Enabled；
-//          Flash=16MB；PSRAM=OPI PSRAM；Partition=16M with OTA。
+// 開發板:ESP32S3 Dev Module;USB CDC On Boot=Enabled;
+//          Flash=16MB;PSRAM=OPI PSRAM;Partition=16M with OTA。
 //
-// 函式庫：LovyanGFX（per-sketch config，下面 LGFX class）、RF24、SD、SPI。
+// 函式庫:LovyanGFX(per-sketch config,下面 LGFX class)、RF24、SD、SPI。
 //
-// 飛機端 Drone_FC_PID 已改成新封包（mode/flags/paramID/paramVal），
-// 兩端必須同時重燒，封包對不上會收到亂碼。
+// 飛機端 Drone_FC_PID 已改成新封包(mode/flags/paramID/paramVal),
+// 兩端必須同時重燒,封包對不上會收到亂碼。
+//
+// V2-A 變更歷程:
+//   - 原本用 MAR2406 並列 8-bit TFT,佔 11 隻 GPIO
+//   - 2026-06-02 換成 MSP2806 SPI TFT,只佔 2 隻 + 共用 SPI,省 9 隻
+//     GPIO 11~18 全部釋出給 V2-B 或其他擴充
 // ============================================================
 
 #include <SPI.h>
@@ -28,34 +34,34 @@
 #include <LovyanGFX.hpp>
 
 // ============================================================
-// LovyanGFX：MAR2406 並列 8-bit ILI9341（per-sketch 設定，免改 library）
+// LovyanGFX：MSP2806 2.8" SPI ILI9341（共用 NRF24/SD 的 SPI 匯流排）
+// 直立 240×320,左右省下原本並列的 8 隻 GPIO
 // ============================================================
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9341 _panel_instance;
-  lgfx::Bus_Parallel8 _bus_instance;
+  lgfx::Bus_SPI       _bus_instance;
 public:
   LGFX() {
     {
       auto cfg = _bus_instance.config();
-      cfg.freq_write = 20000000;
-      cfg.pin_wr = 47;
-      cfg.pin_rd = -1;
-      cfg.pin_rs = 21;
-      cfg.pin_d0 = 11;
-      cfg.pin_d1 = 12;
-      cfg.pin_d2 = 13;
-      cfg.pin_d3 = 14;
-      cfg.pin_d4 = 15;
-      cfg.pin_d5 = 16;
-      cfg.pin_d6 = 17;
-      cfg.pin_d7 = 18;
+      cfg.spi_host    = SPI2_HOST;
+      cfg.spi_mode    = 0;
+      cfg.freq_write  = 40000000;          // 40 MHz 寫入
+      cfg.freq_read   = 16000000;
+      cfg.spi_3wire   = false;
+      cfg.use_lock    = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+      cfg.pin_sclk    = 38;                // 跟 NRF24/SD 共用
+      cfg.pin_mosi    = 39;                // 同上
+      cfg.pin_miso    = 40;                // 同上
+      cfg.pin_dc      = 21;                // 沿用原 RS 那隻
       _bus_instance.config(cfg);
       _panel_instance.setBus(&_bus_instance);
     }
     {
       auto cfg = _panel_instance.config();
-      cfg.pin_cs   = 48;
-      cfg.pin_rst  = -1;   // 接 3V3 + 10k 上拉，省 GPIO
+      cfg.pin_cs   = 48;                   // 沿用原 TFT CS 那隻
+      cfg.pin_rst  = -1;                   // 接 3V3 + 10k 上拉,省 GPIO
       cfg.pin_busy = -1;
       cfg.panel_width  = 240;
       cfg.panel_height = 320;
@@ -64,11 +70,11 @@ public:
       cfg.offset_rotation = 0;
       cfg.dummy_read_pixel = 8;
       cfg.dummy_read_bits  = 1;
-      cfg.readable  = false;     // RD 接 3V3，不讀
+      cfg.readable  = false;
       cfg.invert    = false;
       cfg.rgb_order = false;
       cfg.dlen_16bit = false;
-      cfg.bus_shared = false;
+      cfg.bus_shared = true;               // ★ 跟 NRF24/SD 共用 SPI 必開
       _panel_instance.config(cfg);
     }
     setPanel(&_panel_instance);
@@ -220,86 +226,113 @@ void handleMenuButton(int btn) {
 }
 
 // ============================================================
-// TFT UI：static 一次畫底色 + dynamic 用 fg/bg 文字覆寫，幾乎無閃爍
+// TFT UI(直立 240×320):static 一次畫底色 + dynamic 文字覆寫
 // ============================================================
 void drawFlightStatic() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0,   0, 320, 30, TFT_NAVY);     // 頂部標題列
-  tft.fillRect(0, 200, 320, 40, TFT_DARKGREY); // 底部狀態列
+  tft.fillRect(0,   0, 240, 32, TFT_NAVY);     // 頂部標題列
+  tft.fillRect(0, 280, 240, 40, TFT_DARKGREY); // 底部狀態列
 }
 
 void drawFlightDynamic(byte mode) {
   char buf[40];
   bool armed = tele.status & 0x01;
 
-  // 頂部：模式 + ARM 狀態
+  // 頂部:模式 + ARM 狀態
   tft.setTextFont(4);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setCursor(5, 2);
-  snprintf(buf, sizeof(buf), "M%d %-10s", mode, MODE_NAME[mode]);
+  tft.setCursor(5, 4);
+  snprintf(buf, sizeof(buf), "M%d %-8s", mode, MODE_NAME[mode]);
   tft.print(buf);
 
   tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
-  tft.setCursor(230, 2);
+  tft.setCursor(170, 4);
   tft.print(armed ? "ARMED" : " OFF ");
 
-  // 主體：可飛/未實作 切換時清一次
+  // 主體:可飛/未實作 切換時清一次
   static byte lastBlock = 255;
   byte block = (mode > MAX_FLY_MODE) ? 0 : 1;
   if (block != lastBlock) {
-    tft.fillRect(0, 32, 320, 168, TFT_BLACK);
+    tft.fillRect(0, 34, 240, 244, TFT_BLACK);
     lastBlock = block;
   }
 
-  tft.setTextFont(4);
   if (mode > MAX_FLY_MODE) {
+    tft.setTextFont(4);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.setCursor(40, 100);
-    tft.print("MODE NOT SET");
+    tft.setCursor(20, 140);
+    tft.print("MODE NOT");
+    tft.setCursor(40, 175);
+    tft.print("  SET");
   } else {
+    // 直立排版,三個姿態各佔一段(用大字 font 6 或 4)
+    tft.setTextFont(4);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    snprintf(buf, sizeof(buf), "R: %+6.1f deg ", tele.roll  / 10.0);
-    tft.setCursor(15,  50); tft.print(buf);
-    snprintf(buf, sizeof(buf), "P: %+6.1f deg ", tele.pitch / 10.0);
-    tft.setCursor(15,  90); tft.print(buf);
-    snprintf(buf, sizeof(buf), "Y: %+6.1f d/s ", tele.yawRate / 10.0);
-    tft.setCursor(15, 130); tft.print(buf);
+    // Roll
+    tft.setCursor(10, 50);
+    tft.print("Roll");
+    tft.setCursor(10, 80);
+    snprintf(buf, sizeof(buf), "%+7.1f", tele.roll / 10.0);
+    tft.print(buf);
+    tft.setCursor(180, 80);
+    tft.print((char)247);  // ° 符號
+    // Pitch
+    tft.setCursor(10, 130);
+    tft.print("Pitch");
+    tft.setCursor(10, 160);
+    snprintf(buf, sizeof(buf), "%+7.1f", tele.pitch / 10.0);
+    tft.print(buf);
+    tft.setCursor(180, 160);
+    tft.print((char)247);
+    // Yaw rate
+    tft.setCursor(10, 210);
+    tft.print("Yaw");
+    tft.setCursor(10, 240);
+    snprintf(buf, sizeof(buf), "%+7.1f", tele.yawRate / 10.0);
+    tft.print(buf);
+    tft.setCursor(180, 240);
+    tft.print("/s");
   }
 
-  // 底部：油門 / 電量 / 連線 / SD
+  // 底部狀態列(兩行)
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  snprintf(buf, sizeof(buf), "Thr %3d%%  Bat %4.1fV  %-7s  %-2s ",
+  snprintf(buf, sizeof(buf), "Thr %3d%%   Bat %4.1fV",
            (int)(data.throttle * 100 / 255),
-           tele.battery_mV / 1000.0,
+           tele.battery_mV / 1000.0);
+  tft.setCursor(5, 285);
+  tft.print(buf);
+  snprintf(buf, sizeof(buf), "%-8s   %-2s ",
            teleOK ? "Link OK" : "Link --",
            sdOK ? "SD" : "  ");
-  tft.setCursor(5, 215);
+  tft.setCursor(5, 302);
   tft.print(buf);
 }
 
 void drawMenuStatic() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0,   0, 320, 30, TFT_PURPLE);
-  tft.fillRect(0, 210, 320, 30, TFT_DARKGREY);
+  tft.fillRect(0,   0, 240, 32, TFT_PURPLE);
+  tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
   tft.setTextFont(4);
   tft.setTextColor(TFT_WHITE, TFT_PURPLE);
-  tft.setCursor(70, 2);
+  tft.setCursor(20, 4);
   tft.print("== PID SETUP ==");
 
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  tft.setCursor(5, 218);
-  tft.print("Pitch:cursor  +/-:adj  OK:send  Back:exit");
+  tft.setCursor(5, 285);
+  tft.print("R-stick: cursor  +/-: adj");
+  tft.setCursor(5, 302);
+  tft.print("OK: send   Back: exit");
 }
 
 void drawMenuDynamic() {
-  // 只重畫狀態變過的列（cursor 跳走 / 值改了），避免閃爍
+  // 只重畫狀態變過的列(cursor 跳走 / 值改了),避免閃爍
   static int   lastCursor = -1;
   static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999 };
   char buf[24];
-  const int rowH = 32;
+  const int rowH = 46;     // 直立空間多,每列更高
 
   for (int i = 0; i < N_PARAM; i++) {
     bool sel    = (i == menuCursor);
@@ -310,13 +343,13 @@ void drawMenuDynamic() {
       int y = 40 + i * rowH;
       uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
       uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
-      tft.fillRect(0, y, 320, rowH, bg);
+      tft.fillRect(0, y, 240, rowH, bg);
       tft.setTextFont(4);
       tft.setTextColor(fg, bg);
-      tft.setCursor(10, y + 4);
+      tft.setCursor(10, y + 10);
       tft.print(sel ? ">" : " ");
       tft.print(params[i].name);
-      tft.setCursor(180, y + 4);
+      tft.setCursor(120, y + 10);
       snprintf(buf, sizeof(buf), "%7.3f", params[i].val);
       tft.print(buf);
       lastVal[i] = params[i].val;
@@ -335,7 +368,7 @@ void setup() {
 
   // TFT 先起來，方便顯示開機進度
   tft.init();
-  tft.setRotation(1);   // 320×240 landscape
+  tft.setRotation(0);   // 240×320 portrait(直立)
   tft.fillScreen(TFT_BLACK);
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
