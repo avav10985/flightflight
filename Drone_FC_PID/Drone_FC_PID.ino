@@ -28,6 +28,7 @@
 //   calfull    ← 完整校準 gyro + level(1.5 秒,需平面,寫 NVS)
 //   calload    ← 從 NVS 載入校準
 //   calclear   ← 清掉 NVS 校準資料
+//   gps        ← 印當前 GPS lat/lon/sat
 // ============================================================
 
 #include <Wire.h>
@@ -35,7 +36,8 @@
 #include <RF24.h>
 #include <MPU6050.h>
 #include <ESP32Servo.h>
-#include <Preferences.h>   // NVS 校準持久化
+#include <Preferences.h>     // NVS 校準持久化
+#include <TinyGPSPlus.h>     // GPS NMEA 解析(GY-NEO6MV2)
 
 // ---- 腳位 ----
 #define PIN_NRF_CE   4
@@ -47,6 +49,8 @@
 #define PIN_SDA      21
 #define PIN_SCL      22
 #define PIN_BAT_ADC  34   // 電池分壓中點
+#define PIN_GPS_RX   16   // ESP32 RX2 ← GPS TX
+#define PIN_GPS_TX   17   // ESP32 TX2 → GPS RX(NEO-6M 其實不需要從 ESP32 收指令)
 
 // ---- NRF24 設定 ----
 const uint64_t PIPE_IN     = 0xABCDABCD71LL;
@@ -65,18 +69,28 @@ struct Signal {
 };
 
 // 飛機 → 地面（ACK payload 回傳遙測）
+// 2026-06-04 擴展:加 GPS sat/lat/lon,status 分位元
 struct Telemetry {
   int16_t  roll;        // 角度 ×10
   int16_t  pitch;
-  int16_t  yawRate;
+  int16_t  yawRate;     // 角速度 ×10°/s
   uint16_t battery_mV;  // 電壓 mV
-  uint8_t  status;      // bit0=armed
-  uint8_t  reserved;
-};   // 10 bytes
+  uint8_t  status;      // 見下面 STATUS_* 位元定義
+  uint8_t  satCount;    // GPS 衛星數
+  int32_t  lat_e7;      // 緯度 × 10^7(e.g. 25.0331° → 250331000)
+  int32_t  lon_e7;      // 經度 × 10^7
+};   // 18 bytes(NRF24 ACK payload max 32)
 
-RF24    radio(PIN_NRF_CE, PIN_NRF_CSN);
-MPU6050 mpu;
-Servo   esc1, esc2, esc3, esc4;
+// Telemetry.status 位元定義
+#define STATUS_ARMED         0x01   // bit0:已 armed
+#define STATUS_CALIBRATING   0x02   // bit1:正在校準
+#define STATUS_CAL_FAILED    0x04   // bit2:上次校準失敗(動作偵測拒寫)
+#define STATUS_GPS_FIX       0x08   // bit3:GPS 有效定位
+
+RF24        radio(PIN_NRF_CE, PIN_NRF_CSN);
+MPU6050     mpu;
+Servo       esc1, esc2, esc3, esc4;
+TinyGPSPlus gps;             // NEO-6M NMEA 解析
 
 Signal        data;
 Telemetry     tele;
@@ -92,6 +106,16 @@ float         levelOffsetRoll = 0, levelOffsetPitch = 0;   // 水平基準（解
 Preferences   imuPrefs;                                    // NVS 命名空間 "imu"
 bool          calLoaded = false;                           // 是否從 NVS 載入過
 const int16_t MOTION_GYRO_THRESHOLD = 500;                 // 校準採樣期間 gyro range 上限(raw counts);超過 = 有動,拒寫
+
+// 校準狀態旗標(給 telemetry status bit 用)
+bool          isCalibrating = false;
+bool          lastCalFailed = false;
+
+// GPS 狀態
+double        gps_lat = 0;
+double        gps_lon = 0;
+uint8_t       gps_sat = 0;
+bool          gps_fix = false;
 
 // ---- PID 增益（從拘束測試調出來的值）----
 float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
@@ -193,9 +217,12 @@ bool sampleIMU(int N, bool includeLevel,
 
 bool calibrateGyroQuick() {
   Serial.println("[*] 快速 gyro 校準 (0.3 秒,請靜止)...");
+  isCalibrating = true;
   float newGx, newGy, newGz, dummy_r, dummy_p;
   if (!sampleIMU(60, false, newGx, newGy, newGz, dummy_r, dummy_p)) {
     Serial.println("[!] 校準失敗:採樣期間有動作,保留原 gyro offset");
+    isCalibrating = false;
+    lastCalFailed = true;
     return false;
   }
   gyroOffsetX = newGx;
@@ -206,14 +233,19 @@ bool calibrateGyroQuick() {
   saveCalibration();
   Serial.printf("[*] gyro offset: gx=%.1f gy=%.1f gz=%.1f (寫 NVS)\n",
                 gyroOffsetX, gyroOffsetY, gyroOffsetZ);
+  isCalibrating = false;
+  lastCalFailed = false;
   return true;
 }
 
 bool calibrateFull() {
   Serial.println("[*] 完整校準 (gyro + level, 1.5 秒,放水平面靜止)...");
+  isCalibrating = true;
   float newGx, newGy, newGz, newR, newP;
   if (!sampleIMU(300, true, newGx, newGy, newGz, newR, newP)) {
     Serial.println("[!] 校準失敗:採樣期間有動作,保留原 offset");
+    isCalibrating = false;
+    lastCalFailed = true;
     return false;
   }
   gyroOffsetX = newGx;
@@ -228,11 +260,31 @@ bool calibrateFull() {
                 gyroOffsetX, gyroOffsetY, gyroOffsetZ);
   Serial.printf("[*] level offset: R=%.2f° P=%.2f° (寫 NVS)\n",
                 levelOffsetRoll, levelOffsetPitch);
+  isCalibrating = false;
+  lastCalFailed = false;
   return true;
 }
 
 // 舊名相容:其他地方還叫 calibrateGyro() 的就走完整版
 void calibrateGyro() { calibrateFull(); }
+
+// GPS NMEA 持續解析(從 Serial2 餵 TinyGPSPlus)
+void readGPS() {
+  while (Serial2.available()) {
+    gps.encode(Serial2.read());
+  }
+  if (gps.location.isValid() && gps.location.isUpdated()) {
+    gps_lat = gps.location.lat();
+    gps_lon = gps.location.lng();
+    gps_fix = true;
+  } else if (gps.location.age() > 5000) {
+    // 5 秒沒新資料 → 失效
+    gps_fix = false;
+  }
+  if (gps.satellites.isValid()) {
+    gps_sat = gps.satellites.value();
+  }
+}
 
 void resetData() {
   data.throttle = 0;
@@ -255,8 +307,17 @@ void buildTelemetry() {
   tele.pitch      = (int16_t)(pitch * 10);
   tele.yawRate    = (int16_t)(yawRate * 10);
   tele.battery_mV = (uint16_t)(batteryV * 1000);
-  tele.status     = armed ? 0x01 : 0x00;
-  tele.reserved   = 0;
+
+  uint8_t st = 0;
+  if (armed)         st |= STATUS_ARMED;
+  if (isCalibrating) st |= STATUS_CALIBRATING;
+  if (lastCalFailed) st |= STATUS_CAL_FAILED;
+  if (gps_fix)       st |= STATUS_GPS_FIX;
+  tele.status     = st;
+
+  tele.satCount   = gps_sat;
+  tele.lat_e7     = gps_fix ? (int32_t)(gps_lat * 1e7) : 0;
+  tele.lon_e7     = gps_fix ? (int32_t)(gps_lon * 1e7) : 0;
 }
 
 // 套用地面傳來的參數
@@ -471,17 +532,26 @@ void parseSerial() {
   } else if (s == "calclear") {
     clearCalibration();
     Serial.println("[!] NVS 已清,offset 全部歸 0");
+  } else if (s == "gps") {
+    if (gps_fix) {
+      Serial.printf(">> GPS: lat=%.7f lon=%.7f sat=%d age=%lums\n",
+                    gps_lat, gps_lon, gps_sat, (unsigned long)gps.location.age());
+    } else {
+      Serial.printf(">> GPS: no fix, sat=%d (NEO-6M 冷啟動 30~120 秒,天線朝天)\n",
+                    gps_sat);
+    }
   } else {
-    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear");
+    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear、gps");
   }
 }
 
 void debugPrint() {
   if (millis() - lastDbgTime < 200) return;
   lastDbgTime = millis();
-  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%d lock%d arm%d Thr%3d | Bat%.2fV | PID r%+5.0f p%+5.0f y%+5.0f\n",
+  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s | PID r%+5.0f p%+5.0f y%+5.0f\n",
                 roll, pitch, yawRate,
                 data.mode, safetyReleased, armed, data.throttle, batteryV,
+                gps_sat, gps_fix ? "FIX" : "---",
                 rollOut, pitchOut, yawOut);
 }
 
@@ -493,6 +563,9 @@ void setup() {
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);
   Serial.println("[1] I2C ready");
+
+  Serial2.begin(9600, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+  Serial.println("[1b] GPS UART2 @ 9600 啟動 (NEO-6M 冷啟動 30~120 秒)");
 
   mpu.initialize();
   Serial.print("[2] MPU6050: ");
@@ -550,6 +623,7 @@ void loop() {
   checkCalibrationTrigger();
   readAttitude();
   readBattery();
+  readGPS();
   pidControl();
   writeMotors();
   debugPrint();

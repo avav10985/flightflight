@@ -28,6 +28,7 @@
 //   calfull    ← 完整校準 gyro + level(1.5 秒,需平面,寫 NVS)
 //   calload    ← 從 NVS 載入校準
 //   calclear   ← 清掉 NVS 校準資料
+//   gps        ← 印當前 GPS lat/lon/sat
 // ============================================================
 
 #include <Wire.h>
@@ -37,7 +38,8 @@
 #include <ESP32Servo.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <Preferences.h>   // NVS 校準持久化
+#include <Preferences.h>     // NVS 校準持久化
+#include <TinyGPSPlus.h>     // GPS NMEA 解析(GY-NEO6MV2)
 
 // ---- WiFi Debug AP(免線即時遙測:連 DroneDebug → 開 192.168.4.1)----
 const char* DBG_AP_SSID = "DroneDebug";
@@ -53,6 +55,8 @@ WebServer dbgServer(80);
 #define PIN_ESC4     14   // M4 後右 CW
 #define PIN_SDA      21
 #define PIN_SCL      22
+#define PIN_GPS_RX   16   // ESP32 RX2 ← GPS TX
+#define PIN_GPS_TX   17   // ESP32 TX2 → GPS RX
 
 // ---- NRF24 設定 ----
 const uint64_t PIPE_IN     = 0xABCDABCD71LL;
@@ -62,9 +66,10 @@ struct Signal {
   byte throttle, pitch, roll, yaw, aux1, aux2;
 };
 
-RF24    radio(PIN_NRF_CE, PIN_NRF_CSN);
-MPU6050 mpu;
-Servo   esc1, esc2, esc3, esc4;
+RF24        radio(PIN_NRF_CE, PIN_NRF_CSN);
+MPU6050     mpu;
+Servo       esc1, esc2, esc3, esc4;
+TinyGPSPlus gps;             // NEO-6M NMEA 解析
 
 Signal        data;
 bool          armed       = false;
@@ -77,6 +82,12 @@ float         levelOffsetRoll = 0, levelOffsetPitch = 0;   // 水平基準（解
 Preferences   imuPrefs;                                    // NVS 命名空間 "imu"
 bool          calLoaded = false;
 const int16_t MOTION_GYRO_THRESHOLD = 500;                 // 校準採樣 gyro range 上限,超過視為有動
+
+// GPS 狀態(legacy 沒 telemetry,只能 Serial / WiFi 顯示)
+double        gps_lat = 0;
+double        gps_lon = 0;
+uint8_t       gps_sat = 0;
+bool          gps_fix = false;
 
 // ---- PID 增益（從拘束測試調出來的值）----
 float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
@@ -213,6 +224,23 @@ bool calibrateFull() {
 }
 
 void calibrateGyro() { calibrateFull(); }   // 舊名相容
+
+// GPS NMEA 持續解析(從 Serial2 餵 TinyGPSPlus)
+void readGPS() {
+  while (Serial2.available()) {
+    gps.encode(Serial2.read());
+  }
+  if (gps.location.isValid() && gps.location.isUpdated()) {
+    gps_lat = gps.location.lat();
+    gps_lon = gps.location.lng();
+    gps_fix = true;
+  } else if (gps.location.age() > 5000) {
+    gps_fix = false;
+  }
+  if (gps.satellites.isValid()) {
+    gps_sat = gps.satellites.value();
+  }
+}
 
 void resetData() {
   data.throttle = 0;
@@ -390,8 +418,16 @@ void parseSerial() {
   } else if (s == "calclear") {
     clearCalibration();
     Serial.println("[!] NVS 已清,offset 全部歸 0");
+  } else if (s == "gps") {
+    if (gps_fix) {
+      Serial.printf(">> GPS: lat=%.7f lon=%.7f sat=%d age=%lums\n",
+                    gps_lat, gps_lon, gps_sat, (unsigned long)gps.location.age());
+    } else {
+      Serial.printf(">> GPS: no fix, sat=%d (NEO-6M 冷啟動 30~120 秒,天線朝天)\n",
+                    gps_sat);
+    }
   } else {
-    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear");
+    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear、gps");
   }
 }
 
@@ -427,7 +463,8 @@ void handleDebugRoot() {
     "  yawOut  : %+8.2f\n\n"
     "PID gains (R/P):  Kp=%.3f  Ki=%.3f  Kd=%.3f\n"
     "PID gains (Yaw):  Kp=%.3f  Ki=%.3f\n\n"
-    "MAX_ANGLE: %.1f deg    MAX_YAWRATE: %.1f deg/s\n"
+    "MAX_ANGLE: %.1f deg    MAX_YAWRATE: %.1f deg/s\n\n"
+    "GPS sat=%d %s  %s\n"
     "</pre></body></html>",
     roll, pitch, yawRate,
     data.throttle, map(data.throttle, 0, 255, 1000, 2000),
@@ -436,7 +473,9 @@ void handleDebugRoot() {
     rollOut, pitchOut, yawOut,
     Kp_rp, Ki_rp, Kd_rp,
     Kp_y, Ki_y,
-    MAX_ANGLE, MAX_YAWRATE);
+    MAX_ANGLE, MAX_YAWRATE,
+    gps_sat, gps_fix ? "FIX" : "---",
+    gps_fix ? String("(" + String(gps_lat, 7) + ", " + String(gps_lon, 7) + ")").c_str() : "(no position)");
   dbgServer.send(200, "text/html", buf);
 }
 
@@ -448,6 +487,9 @@ void setup() {
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);
   Serial.println("[1] I2C ready");
+
+  Serial2.begin(9600, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+  Serial.println("[1b] GPS UART2 @ 9600 啟動 (NEO-6M 冷啟動 30~120 秒)");
 
   mpu.initialize();
   Serial.print("[2] MPU6050: ");
@@ -509,6 +551,7 @@ void loop() {
   checkArm();
   checkCalibrationTrigger();
   readAttitude();
+  readGPS();
   pidControl();
   writeMotors();
   debugPrint();
