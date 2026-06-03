@@ -24,7 +24,10 @@
 //   ypp 2.0    ← Yaw Kp
 //   yi 0.01    ← Yaw Ki
 //   p          ← 顯示目前所有值
-//   cal        ← 重新校正陀螺儀
+//   cal        ← 快速 gyro-only 校準(0.3 秒,寫 NVS)
+//   calfull    ← 完整校準 gyro + level(1.5 秒,需平面,寫 NVS)
+//   calload    ← 從 NVS 載入校準
+//   calclear   ← 清掉 NVS 校準資料
 // ============================================================
 
 #include <Wire.h>
@@ -32,6 +35,7 @@
 #include <RF24.h>
 #include <MPU6050.h>
 #include <ESP32Servo.h>
+#include <Preferences.h>   // NVS 校準持久化
 
 // ---- 腳位 ----
 #define PIN_NRF_CE   4
@@ -85,6 +89,9 @@ float         roll = 0, pitch = 0, yawRate = 0;
 int16_t       rawAx, rawAy, rawAz, rawGx, rawGy, rawGz;
 float         gyroOffsetX = 0, gyroOffsetY = 0, gyroOffsetZ = 0;
 float         levelOffsetRoll = 0, levelOffsetPitch = 0;   // 水平基準（解決 MPU6050 沒裝水平）
+Preferences   imuPrefs;                                    // NVS 命名空間 "imu"
+bool          calLoaded = false;                           // 是否從 NVS 載入過
+const int16_t MOTION_GYRO_THRESHOLD = 500;                 // 校準採樣期間 gyro range 上限(raw counts);超過 = 有動,拒寫
 
 // ---- PID 增益（從拘束測試調出來的值）----
 float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
@@ -97,35 +104,135 @@ const float MAX_YAWRATE = 90.0f;     // ±90°/s 期望偏航
 float i_roll = 0, i_pitch = 0, i_yaw = 0;
 float rollOut = 0, pitchOut = 0, yawOut = 0;
 
-void calibrateGyro() {
-  Serial.println("[*] 校正陀螺儀 + 水平基準（3 秒），請把飛機平放...");
-  const int N = 300;
+// ============================================================
+// IMU 校準系統(2026-06-03 改版)
+//
+// 兩種校準:
+//   1. 快速 (Quick) - 0.3 秒,只校 gyro 漂移,不動 level
+//      → 開機時做、進 mode 0 自動做、flags bit0 觸發
+//   2. 完整 (Full)  - 1.5 秒,gyro + level 一起校
+//      → 只在首次安裝/Serial 指令觸發,需要儘量水平的地面
+//
+// 動作偵測:校準採樣期間如果 gyro range 超過 MOTION_GYRO_THRESHOLD,
+//          表示有動,拒寫 offset,保留原值。
+//
+// NVS:命名空間 "imu",key = gx_off/gy_off/gz_off/lvl_r/lvl_p/cal_ok
+// ============================================================
+
+bool loadCalibration() {
+  imuPrefs.begin("imu", true);   // readonly
+  bool ok = imuPrefs.getUChar("cal_ok", 0) == 1;
+  if (ok) {
+    gyroOffsetX     = imuPrefs.getFloat("gx_off", 0);
+    gyroOffsetY     = imuPrefs.getFloat("gy_off", 0);
+    gyroOffsetZ     = imuPrefs.getFloat("gz_off", 0);
+    levelOffsetRoll  = imuPrefs.getFloat("lvl_r", 0);
+    levelOffsetPitch = imuPrefs.getFloat("lvl_p", 0);
+  }
+  imuPrefs.end();
+  return ok;
+}
+
+void saveCalibration() {
+  imuPrefs.begin("imu", false);  // read-write
+  imuPrefs.putFloat("gx_off", gyroOffsetX);
+  imuPrefs.putFloat("gy_off", gyroOffsetY);
+  imuPrefs.putFloat("gz_off", gyroOffsetZ);
+  imuPrefs.putFloat("lvl_r", levelOffsetRoll);
+  imuPrefs.putFloat("lvl_p", levelOffsetPitch);
+  imuPrefs.putUChar("cal_ok", 1);
+  imuPrefs.end();
+}
+
+void clearCalibration() {
+  imuPrefs.begin("imu", false);
+  imuPrefs.clear();
+  imuPrefs.end();
+  gyroOffsetX = gyroOffsetY = gyroOffsetZ = 0;
+  levelOffsetRoll = levelOffsetPitch = 0;
+  calLoaded = false;
+}
+
+// IMU 採樣 + 動作偵測
+// 回傳 true = OK,false = 有動或失敗(outX 不要用)
+bool sampleIMU(int N, bool includeLevel,
+               float& outGx, float& outGy, float& outGz,
+               float& outR,  float& outP) {
   long sx = 0, sy = 0, sz = 0;
   float sumRoll = 0, sumPitch = 0;
+  int16_t minGx = 32767, maxGx = -32768;
+  int16_t minGy = 32767, maxGy = -32768;
+  int16_t minGz = 32767, maxGz = -32768;
   int16_t ax, ay, az, gx, gy, gz;
   for (int i = 0; i < N; i++) {
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
     sx += gx; sy += gy; sz += gz;
-    // 同時計算靜態角度（用同樣的軸對齊公式）
-    sumRoll  += atan2f(ax, az) * 57.2958f;
-    sumPitch += atan2f(-ay, sqrtf((float)ax*ax + (float)az*az)) * 57.2958f;
+    if (gx < minGx) minGx = gx; if (gx > maxGx) maxGx = gx;
+    if (gy < minGy) minGy = gy; if (gy > maxGy) maxGy = gy;
+    if (gz < minGz) minGz = gz; if (gz > maxGz) maxGz = gz;
+    if (includeLevel) {
+      sumRoll  += atan2f(ax, az) * 57.2958f;
+      sumPitch += atan2f(-ay, sqrtf((float)ax*ax + (float)az*az)) * 57.2958f;
+    }
     delay(5);
   }
-  gyroOffsetX = sx / (float)N;
-  gyroOffsetY = sy / (float)N;
-  gyroOffsetZ = sz / (float)N;
-  levelOffsetRoll  = sumRoll  / N;
-  levelOffsetPitch = sumPitch / N;
+  if ((maxGx - minGx) > MOTION_GYRO_THRESHOLD ||
+      (maxGy - minGy) > MOTION_GYRO_THRESHOLD ||
+      (maxGz - minGz) > MOTION_GYRO_THRESHOLD) {
+    return false;
+  }
+  outGx = sx / (float)N;
+  outGy = sy / (float)N;
+  outGz = sz / (float)N;
+  if (includeLevel) {
+    outR = sumRoll  / N;
+    outP = sumPitch / N;
+  }
+  return true;
+}
 
-  // 重置 PID 與互補濾波狀態
+bool calibrateGyroQuick() {
+  Serial.println("[*] 快速 gyro 校準 (0.3 秒,請靜止)...");
+  float newGx, newGy, newGz, dummy_r, dummy_p;
+  if (!sampleIMU(60, false, newGx, newGy, newGz, dummy_r, dummy_p)) {
+    Serial.println("[!] 校準失敗:採樣期間有動作,保留原 gyro offset");
+    return false;
+  }
+  gyroOffsetX = newGx;
+  gyroOffsetY = newGy;
+  gyroOffsetZ = newGz;
   roll = pitch = yawRate = 0;
   i_roll = i_pitch = i_yaw = 0;
-
-  Serial.printf("[*] 陀螺儀偏移: gx=%.1f gy=%.1f gz=%.1f\n",
+  saveCalibration();
+  Serial.printf("[*] gyro offset: gx=%.1f gy=%.1f gz=%.1f (寫 NVS)\n",
                 gyroOffsetX, gyroOffsetY, gyroOffsetZ);
-  Serial.printf("[*] 水平基準: R=%.2f° P=%.2f°（已扣除）\n",
-                levelOffsetRoll, levelOffsetPitch);
+  return true;
 }
+
+bool calibrateFull() {
+  Serial.println("[*] 完整校準 (gyro + level, 1.5 秒,放水平面靜止)...");
+  float newGx, newGy, newGz, newR, newP;
+  if (!sampleIMU(300, true, newGx, newGy, newGz, newR, newP)) {
+    Serial.println("[!] 校準失敗:採樣期間有動作,保留原 offset");
+    return false;
+  }
+  gyroOffsetX = newGx;
+  gyroOffsetY = newGy;
+  gyroOffsetZ = newGz;
+  levelOffsetRoll  = newR;
+  levelOffsetPitch = newP;
+  roll = pitch = yawRate = 0;
+  i_roll = i_pitch = i_yaw = 0;
+  saveCalibration();
+  Serial.printf("[*] gyro offset: gx=%.1f gy=%.1f gz=%.1f\n",
+                gyroOffsetX, gyroOffsetY, gyroOffsetZ);
+  Serial.printf("[*] level offset: R=%.2f° P=%.2f° (寫 NVS)\n",
+                levelOffsetRoll, levelOffsetPitch);
+  return true;
+}
+
+// 舊名相容:其他地方還叫 calibrateGyro() 的就走完整版
+void calibrateGyro() { calibrateFull(); }
 
 void resetData() {
   data.throttle = 0;
@@ -230,15 +337,29 @@ void checkArm() {
   if (!armed && data.throttle < 20) armed = true;
 }
 
-// 校正：進入 mode 0（flags bit0 邊緣）+ disarmed + 油門 0 才生效
+// 校準觸發:
+//   1. 進 mode 0 的瞬間(從非 0 → 0)+ disarmed + 油門 0 → 自動「快速 gyro」
+//   2. flags bit0 邊緣(0→1)+ disarmed + 油門 0 + mode 0 → 觸發「完整校準」
 void checkCalibrationTrigger() {
+  static byte lastMode = 0xFF;
   static byte lastCalFlag = 0;
+
+  // 1. 進 mode 0 那一瞬間 → 自動快速 gyro
+  if (data.mode == 0 && lastMode != 0 &&
+      !armed && data.throttle < 5) {
+    Serial.println("\n[!] 進 mode 0 觸發快速 gyro 校準");
+    calibrateGyroQuick();
+  }
+
+  // 2. flags bit0 邊緣 → 完整校準
   byte calFlag = data.flags & 0x01;
   if (!armed && data.mode == 0 && data.throttle < 5 &&
       lastCalFlag == 0 && calFlag == 1) {
-    Serial.println("\n[!] mode 0 觸發校正（請保持飛機平放靜止）");
-    calibrateGyro();
+    Serial.println("\n[!] flags bit0 觸發完整校準");
+    calibrateFull();
   }
+
+  lastMode = data.mode;
   lastCalFlag = calFlag;
 }
 
@@ -335,9 +456,23 @@ void parseSerial() {
     Serial.printf(">> RP: Kp=%.3f Ki=%.3f Kd=%.3f | Yaw: Kp=%.3f Ki=%.3f\n",
                   Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
   } else if (s == "cal") {
-    calibrateGyro();
+    calibrateGyroQuick();
+  } else if (s == "calfull") {
+    calibrateFull();
+  } else if (s == "calload") {
+    if (loadCalibration()) {
+      calLoaded = true;
+      Serial.printf("[*] 從 NVS 載入 OK: gyro(%.1f,%.1f,%.1f) level(%.2f°,%.2f°)\n",
+                    gyroOffsetX, gyroOffsetY, gyroOffsetZ,
+                    levelOffsetRoll, levelOffsetPitch);
+    } else {
+      Serial.println("[!] NVS 無校準資料");
+    }
+  } else if (s == "calclear") {
+    clearCalibration();
+    Serial.println("[!] NVS 已清,offset 全部歸 0");
   } else {
-    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal");
+    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear");
   }
 }
 
@@ -363,7 +498,20 @@ void setup() {
   Serial.print("[2] MPU6050: ");
   Serial.println(mpu.testConnection() ? "OK" : "FAIL");
 
-  calibrateGyro();
+  // 校準:先試 NVS 載入,沒有再做首次完整校準
+  if (loadCalibration()) {
+    calLoaded = true;
+    Serial.println("[*] 從 NVS 載入校準資料:");
+    Serial.printf("    gyro: gx=%.1f gy=%.1f gz=%.1f\n",
+                  gyroOffsetX, gyroOffsetY, gyroOffsetZ);
+    Serial.printf("    level: R=%.2f° P=%.2f°\n",
+                  levelOffsetRoll, levelOffsetPitch);
+    // 開機 quick gyro 重校(修正溫度漂移),level 用 NVS 那筆
+    calibrateGyroQuick();
+  } else {
+    Serial.println("[!] NVS 無校準資料,做首次完整校準");
+    calibrateFull();
+  }
 
   esc1.attach(PIN_ESC1, 1000, 2000);
   esc2.attach(PIN_ESC2, 1000, 2000);
