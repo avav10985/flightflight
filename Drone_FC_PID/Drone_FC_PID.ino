@@ -59,11 +59,22 @@ const uint8_t  NRF_CHANNEL = 100;
 // ---- 電池分壓 ----
 const float BAT_DIVIDER = 4.0f;   // (30k+10k)/10k
 
+// ====== 飛行 mode 編碼 ======
+// 兩個 3 段開關組合,SW_A 當十位、SW_B 當個位(各 0/1/2),
+// 9 個有效 byte 值(**不是 0~8 連續整數**):
+//
+//   00=安全/校準            01=手動自穩(目前唯一可飛)    02=GPS 自動到目標
+//   10=語音控制(喚醒「啟動」) 11=PC 控制(USB 橋接)         12=預留
+//   20=預留                  21=預留                       22=預留
+//
+// 計算公式:data.mode = SW_A_value * 10 + SW_B_value
+// SW_A / SW_B 值定義:上=0、中=1、下=2
+
 // 地面 → 飛機（指令 + 參數）
 struct Signal {
   byte throttle, pitch, roll, yaw;
-  byte mode;        // 0~8（00=校準/安全；01=手動自穩；02~08 預留未實作）
-  byte flags;       // bit0=校準觸發；其餘保留
+  byte mode;        // 兩位數編碼,見上面註解
+  byte flags;       // bit0=完整校準觸發;其餘保留
   byte paramID;     // 0=無、1=Kp、2=Ki、3=Kd、4=Kp_y、5=Ki_y
   float paramVal;   // 參數值
 };
@@ -117,7 +128,7 @@ double        gps_lon = 0;
 uint8_t       gps_sat = 0;
 bool          gps_fix = false;
 
-// ---- PID 增益（從拘束測試調出來的值）----
+// ---- PID 增益(拘束測試摸出來的初始值;實飛前還要驗證) ----
 float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
 float Kp_y  = 1.5f, Ki_y  = 0.02f;
 
@@ -175,6 +186,7 @@ void clearCalibration() {
   gyroOffsetX = gyroOffsetY = gyroOffsetZ = 0;
   levelOffsetRoll = levelOffsetPitch = 0;
   calLoaded = false;
+  lastCalFailed = false;   // NVS 清乾淨,重置失敗旗標
 }
 
 // IMU 採樣 + 動作偵測
@@ -377,7 +389,9 @@ void failsafe() {
   }
 }
 
-// 目前只有 mode 1（手動自穩）已實作可飛；mode 2~8 視為未設定，一律拒武裝
+// 目前只有 mode 01(手動自穩,byte 值 1)已實作可飛;其他 mode 一律拒武裝。
+// 未來:Mode 02(GPS)、10(語音)、11(PC)實作後要加進條件式,例如:
+//   return m == 1 || m == 2 || m == 10 || m == 11;
 inline bool modeFlyable(byte m) { return m == 1; }
 
 void disarm() {

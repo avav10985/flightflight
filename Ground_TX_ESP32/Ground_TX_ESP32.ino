@@ -4,7 +4,8 @@
 // 功能:
 //   - 油門(左搖桿上下,拆彈簧)/ pitch / roll
 //   - yaw 由肩鍵 L / R(按著 = 固定 ±60°/s)
-//   - 兩個 3 段開關組 9 模式(mode = A×3 + B,00=校準/安全)
+//   - 兩個 3 段開關組 9 模式,**mode = A×10 + B 兩位數編碼**:
+//     00=安全/校準、01=手動、02=GPS、10=語音、11=PC、12/20/21/22=預留
 //   - NRF24 雙向 ACK(送指令 + 收遙測)
 //   - MSP2806 2.8" SPI ILI9341 TFT 240×320 直立顯示模式/姿態/狀態
 //     (跟 NRF24/SD 共用 SPI 匯流排,只佔 CS=48 + DC=21 兩隻獨立腳)
@@ -112,22 +113,32 @@ const uint8_t  NRF_CHANNEL = 100;
 RF24 radio(PIN_NRF_CE, PIN_NRF_CSN);
 
 // ---- 通訊結構（與飛機端一致）----
+// mode 兩位數編碼,9 個值:00/01/02/10/11/12/20/21/22(見上面 header)
 struct Signal {
   byte throttle, pitch, roll, yaw;
-  byte mode;        // 0~8（00=校準/安全）
-  byte flags;       // bit0=校準觸發
-  byte paramID;     // 0=無、1=Kp…5=Ki_y
+  byte mode;        // SW_A×10 + SW_B(各 0/1/2),例:01=A上+B中
+  byte flags;       // bit0=完整校準觸發
+  byte paramID;     // 0=無、1=Kp、2=Ki、3=Kd、4=Kp_y、5=Ki_y
   float paramVal;
 };
 
+// 飛機 → 手把(NRF24 ACK Payload,**必須跟飛機端 Telemetry struct 完全一致**)
 struct Telemetry {
-  int16_t  roll;
+  int16_t  roll;        // 角度 ×10
   int16_t  pitch;
-  int16_t  yawRate;
+  int16_t  yawRate;     // 角速度 ×10°/s
   uint16_t battery_mV;
-  uint8_t  status;      // bit0=armed
-  uint8_t  reserved;
-};
+  uint8_t  status;      // 多 bit:見下面 STATUS_*
+  uint8_t  satCount;    // GPS 衛星數
+  int32_t  lat_e7;      // 緯度 ×10^7
+  int32_t  lon_e7;      // 經度 ×10^7
+};   // 18 bytes(NRF24 ACK Payload 上限 32)
+
+// status 位元定義(跟飛機端一致)
+#define STATUS_ARMED         0x01   // bit0:已 armed
+#define STATUS_CALIBRATING   0x02   // bit1:正在校準
+#define STATUS_CAL_FAILED    0x04   // bit2:上次校準失敗
+#define STATUS_GPS_FIX       0x08   // bit3:GPS 有效定位
 
 Signal    data;
 Telemetry tele;
@@ -135,11 +146,25 @@ bool      teleOK = false;
 bool      sdOK   = false;
 
 // ---- 模式名稱 ----
-const char* MODE_NAME[9] = {
-  "SAFE/CAL", "MANUAL", "ALT-HOLD", "POS-HOLD",
-  "RTL", "AUTO", "LAND", "HEADLESS", "RSVD"
-};
-const byte MAX_FLY_MODE = 1;   // 目前只有 mode 1 可飛；2~8 未設定
+// 兩位數 mode 編碼,值為 0/1/2/10/11/12/20/21/22(9 個離散值)。
+// 用 switch 比較安全,避免陣列索引越界。
+const char* getModeName(byte m) {
+  switch (m) {
+    case 0:  return "SAFE/CAL";   // 安全 / 校準 / 設定 hub
+    case 1:  return "MANUAL";     // 手動自穩(目前唯一可飛)
+    case 2:  return "GPS-AUTO";   // GPS 自動到目標 + 避障 + 降落
+    case 10: return "VOICE";      // 語音控制(喚醒「啟動」)
+    case 11: return "PC";         // PC 透過 USB 控制
+    case 12: case 20:
+    case 21: case 22:    return "RSVD";  // 預留
+    default:             return "????";  // 無效值(應該不會出現)
+  }
+}
+
+// 哪些 mode 已實作(影響 TFT「MODE NOT IMPLEMENTED」提示)。
+// 目前只有 00(安全/設定畫面)跟 01(手動飛行)有完整 UI 跟邏輯。
+// 將來 02 / 10 / 11 加進來後也要更新這個 list。
+bool modeImplemented(byte m) { return m == 0 || m == 1; }
 
 // ---- 選單鈕 ----
 enum { BTN_NONE, BTN_PLUS, BTN_MINUS, BTN_OK, BTN_BACK };
@@ -236,28 +261,28 @@ void drawFlightStatic() {
 
 void drawFlightDynamic(byte mode) {
   char buf[40];
-  bool armed = tele.status & 0x01;
+  bool armed = tele.status & STATUS_ARMED;
 
   // 頂部:模式 + ARM 狀態
   tft.setTextFont(4);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setCursor(5, 4);
-  snprintf(buf, sizeof(buf), "M%d %-8s", mode, MODE_NAME[mode]);
+  snprintf(buf, sizeof(buf), "M%02d %-8s", mode, getModeName(mode));
   tft.print(buf);
 
   tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
   tft.setCursor(170, 4);
   tft.print(armed ? "ARMED" : " OFF ");
 
-  // 主體:可飛/未實作 切換時清一次
+  // 主體:已實作/未實作 切換時清一次
   static byte lastBlock = 255;
-  byte block = (mode > MAX_FLY_MODE) ? 0 : 1;
+  byte block = modeImplemented(mode) ? 1 : 0;
   if (block != lastBlock) {
     tft.fillRect(0, 34, 240, 244, TFT_BLACK);
     lastBlock = block;
   }
 
-  if (mode > MAX_FLY_MODE) {
+  if (!modeImplemented(mode)) {
     tft.setTextFont(4);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.setCursor(20, 140);
@@ -408,7 +433,7 @@ void setup() {
 
 // ============================================================
 void loop() {
-  byte mode = readSwitch3(SW_A) * 3 + readSwitch3(SW_B);
+  byte mode = readSwitch3(SW_A) * 10 + readSwitch3(SW_B);   // 兩位數編碼:A 十位 + B 個位
 
   // 按鈕單一邊緣偵測
   int btn = readMenuBtn();
