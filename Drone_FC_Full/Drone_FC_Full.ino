@@ -32,6 +32,12 @@
 //   calload    ← 從 NVS 載入校準
 //   calclear   ← 清掉 NVS 校準資料
 //   gps        ← 印當前 GPS lat/lon/sat
+//   wp <lat> <lon> <alt>  ← 設目標 waypoint (Mode 02 用,目前只算數學不飛)
+//   wpclear    ← 清掉 waypoint
+//   wpinfo     ← 印目前 waypoint + 距離 + 方位
+//   homenow    ← 把目前位置記為 home(RTH 起點)
+//   home       ← 印 home 位置
+//   yawreset   ← bodyYawEst 重置為 0(假設機頭朝北)
 // ============================================================
 
 // ====== 階段開關(感測器接好就改 1) ======
@@ -168,6 +174,150 @@ bool          gps_fix = false;
 // 之前在 PID 階段拘束測試摸出來的值,還沒實飛驗證最終值
 float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
 float Kp_y  = 1.5f, Ki_y  = 0.02f;
+
+// ============================================================
+// Mode 02 GPS 自動導航 — 純數學 + 狀態機骨架(2026-06-04)
+// ----
+// 目前狀態:純算 + Serial 印,**不送進 PID,飛機不會自動飛**
+// 為什麼:modeFlyable() 還只接受 mode 01,撥到 mode 02 飛機不會 arm
+// 還缺什麼才能真飛:
+//   1. BMP280 開啟(目前 ENABLE_BMP280=0)→ 高度控制
+//   2. VL53L0X 開啟 → 避障 + 底部降落
+//   3. 磁力計 GY-271 → 絕對 yaw(短飛行可勉強用 gyro 積分)
+//   4. modeFlyable() 加 m==2
+//   5. pidControl() 在 mode 2 用 nav* 取代 data.roll/pitch/yaw
+//   6. 完整飛測驗證
+// ============================================================
+
+struct Waypoint {
+  double lat;
+  double lon;
+  float  alt;     // 相對 home 高度(米),0 = 同高
+  bool   active;
+};
+Waypoint targetWP = {0, 0, 0, false};   // 目標座標
+Waypoint homeWP   = {0, 0, 0, false};   // home(起飛位置,失聯 RTL 用)
+
+enum NavState {
+  NAV_IDLE,        // 沒目標 / mode != 2 / gps 沒鎖
+  NAV_CRUISE,      // 飛去目標(距離 > brake 半徑)
+  NAV_APPROACH,    // 接近(距離 < brake 半徑)
+  NAV_LANDING,     // 降落中(尚未實作)
+  NAV_LANDED,      // 完成
+  NAV_FAILED       // 失敗(失聯 / 超時)
+};
+NavState navState = NAV_IDLE;
+
+const float NAV_MAX_LEAN_DEG     = 15.0f;  // 最大傾角(自動模式不敢太激進)
+const float NAV_BRAKE_RADIUS_M   = 3.0f;   // 接近多少米開始煞車
+const float NAV_ARRIVE_RADIUS_M  = 1.0f;   // 到達判定半徑
+const float NAV_LEAN_GAIN        = 5.0f;   // 距離 → 傾角的比例(度 / 米)
+
+// 導航輸出(目前還沒送進 PID)
+float navRollSet = 0, navPitchSet = 0, navYawRateSet = 0;
+float distance_to_target = 0;       // 米
+float bearing_to_target  = 0;       // 度(0~360,北=0 順時針)
+float bodyYawEst         = 0;       // gyro 積分的絕對 yaw 估計(沒磁力計會漂)
+
+// ---- 球面距離 + 方位角數學 ----
+
+const float EARTH_RADIUS_M = 6371000.0f;
+
+// Haversine:兩個 lat/lon 之間的地表距離(米)
+float haversineDistance(double lat1, double lon1, double lat2, double lon2) {
+  double dLat = (lat2 - lat1) * DEG_TO_RAD;
+  double dLon = (lon2 - lon1) * DEG_TO_RAD;
+  double rlat1 = lat1 * DEG_TO_RAD;
+  double rlat2 = lat2 * DEG_TO_RAD;
+  double a = sin(dLat / 2) * sin(dLat / 2) +
+             cos(rlat1) * cos(rlat2) * sin(dLon / 2) * sin(dLon / 2);
+  double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+  return (float)(EARTH_RADIUS_M * c);
+}
+
+// 方位角:從點1看點2 的方向(0~360,北=0 順時針)
+float bearingDegrees(double lat1, double lon1, double lat2, double lon2) {
+  double rlat1 = lat1 * DEG_TO_RAD;
+  double rlat2 = lat2 * DEG_TO_RAD;
+  double dLon  = (lon2 - lon1) * DEG_TO_RAD;
+  double y = sin(dLon) * cos(rlat2);
+  double x = cos(rlat1) * sin(rlat2) - sin(rlat1) * cos(rlat2) * cos(dLon);
+  double b = atan2(y, x) * RAD_TO_DEG;
+  return (float)fmod(b + 360.0, 360.0);
+}
+
+// 角度差,規一化到 -180~+180
+float angleDiffDeg(float target, float current) {
+  float d = fmodf(target - current + 540.0f, 360.0f) - 180.0f;
+  return d;
+}
+
+// ---- 導航主函式 ----
+
+void navigateMode02() {
+  // 沒目標 / 沒 GPS fix → 不動,輸出歸 0
+  if (!targetWP.active || !gps_fix) {
+    if (navState != NAV_IDLE) navState = NAV_IDLE;
+    navRollSet = navPitchSet = navYawRateSet = 0;
+    distance_to_target = 0;
+    bearing_to_target = 0;
+    return;
+  }
+
+  // 算距離 + 方位
+  distance_to_target = haversineDistance(gps_lat, gps_lon, targetWP.lat, targetWP.lon);
+  bearing_to_target  = bearingDegrees(gps_lat, gps_lon, targetWP.lat, targetWP.lon);
+
+  // 狀態機
+  switch (navState) {
+    case NAV_IDLE:
+      navState = NAV_CRUISE;
+      break;
+    case NAV_CRUISE:
+      if (distance_to_target < NAV_BRAKE_RADIUS_M) navState = NAV_APPROACH;
+      break;
+    case NAV_APPROACH:
+      if (distance_to_target < NAV_ARRIVE_RADIUS_M) navState = NAV_LANDING;
+      else if (distance_to_target > NAV_BRAKE_RADIUS_M * 2) navState = NAV_CRUISE;
+      break;
+    case NAV_LANDING:
+      // TODO 降落邏輯(等 BMP280 / 底部 VL53L0X 接上)
+      break;
+    default: break;
+  }
+
+  // 計算機體座標的 pitch / roll
+  // 飛機朝向跟目標方位的差(機體要轉到面對目標)
+  float headingError = angleDiffDeg(bearing_to_target, bodyYawEst);  // -180~+180
+
+  // 距離 → 傾角(線性,有上限)
+  float leanAngle = fminf(distance_to_target * NAV_LEAN_GAIN, NAV_MAX_LEAN_DEG);
+
+  // 接近目標時縮小傾角(煞車)
+  if (distance_to_target < NAV_BRAKE_RADIUS_M) {
+    leanAngle *= distance_to_target / NAV_BRAKE_RADIUS_M;
+  }
+
+  // 轉成機體 pitch / roll
+  float headingRad = headingError * DEG_TO_RAD;
+  navPitchSet = -leanAngle * cosf(headingRad);   // 朝前傾 = 機頭朝下 = pitch 負
+  navRollSet  = -leanAngle * sinf(headingRad);   // 朝右側傾 = roll 負
+
+  // Yaw:暫時不動(目前沒絕對 yaw 參考,加磁力計後改為「轉到面對目標」)
+  navYawRateSet = 0;
+}
+
+const char* navStateName(NavState s) {
+  switch (s) {
+    case NAV_IDLE:     return "IDLE";
+    case NAV_CRUISE:   return "CRUISE";
+    case NAV_APPROACH: return "APPROACH";
+    case NAV_LANDING:  return "LANDING";
+    case NAV_LANDED:   return "LANDED";
+    case NAV_FAILED:   return "FAILED";
+    default:           return "????";
+  }
+}
 
 const float I_LIMIT     = 100.0f;
 const float MAX_ANGLE   = 30.0f;
@@ -450,6 +600,12 @@ void readAttitude() {
 
   roll  = 0.98f * (roll  + gRoll  * dt) + 0.02f * accRoll;
   pitch = 0.98f * (pitch + gPitch * dt) + 0.02f * accPitch;
+
+  // Yaw 絕對角度估計(gyro 積分,沒磁力計會慢慢漂)
+  // 給 Mode 02 GPS 導航算「飛機朝向跟目標方位的差」用
+  bodyYawEst += yawRate * dt;
+  if (bodyYawEst >= 360.0f) bodyYawEst -= 360.0f;
+  if (bodyYawEst < 0.0f)    bodyYawEst += 360.0f;
 }
 
 void recvData() {
@@ -636,8 +792,60 @@ void parseSerial() {
       Serial.printf(">> GPS: no fix, sat=%d (NEO-6M 冷啟動 30~120 秒,天線朝天)\n",
                     gps_sat);
     }
+  } else if (s.startsWith("wp ")) {
+    // 格式:wp <lat> <lon> <alt>(空白分隔)
+    String args = s.substring(3);
+    int sp1 = args.indexOf(' ');
+    int sp2 = args.indexOf(' ', sp1 + 1);
+    if (sp1 > 0 && sp2 > 0) {
+      targetWP.lat = args.substring(0, sp1).toDouble();
+      targetWP.lon = args.substring(sp1 + 1, sp2).toDouble();
+      targetWP.alt = args.substring(sp2 + 1).toFloat();
+      targetWP.active = true;
+      navState = NAV_IDLE;   // 重置狀態機,下次 navigateMode02 進 CRUISE
+      Serial.printf(">> 目標 WP 已設:(%.7f, %.7f, alt=%.1fm)\n",
+                    targetWP.lat, targetWP.lon, targetWP.alt);
+    } else {
+      Serial.println(">> 用法:wp <lat> <lon> <alt>  例:wp 25.0331 121.5654 10");
+    }
+  } else if (s == "wpclear") {
+    targetWP.active = false;
+    navState = NAV_IDLE;
+    Serial.println(">> 目標 WP 清掉");
+  } else if (s == "wpinfo") {
+    if (!targetWP.active) {
+      Serial.println(">> 沒設 WP(用 'wp <lat> <lon> <alt>' 設)");
+    } else if (!gps_fix) {
+      Serial.printf(">> WP=(%.7f, %.7f, %.1fm),但 GPS 沒鎖 → 無法算距離\n",
+                    targetWP.lat, targetWP.lon, targetWP.alt);
+    } else {
+      Serial.printf(">> WP=(%.7f, %.7f, %.1fm) | 距離 %.1fm | 方位 %.1f° | yaw估計 %.1f° | nav %s\n",
+                    targetWP.lat, targetWP.lon, targetWP.alt,
+                    distance_to_target, bearing_to_target, bodyYawEst,
+                    navStateName(navState));
+    }
+  } else if (s == "homenow") {
+    if (gps_fix) {
+      homeWP.lat = gps_lat;
+      homeWP.lon = gps_lon;
+      homeWP.alt = 0;
+      homeWP.active = true;
+      Serial.printf(">> Home 記在當前位置:(%.7f, %.7f)\n", homeWP.lat, homeWP.lon);
+    } else {
+      Serial.println(">> GPS 沒鎖,沒辦法記 home");
+    }
+  } else if (s == "home") {
+    if (homeWP.active) {
+      Serial.printf(">> Home:(%.7f, %.7f)\n", homeWP.lat, homeWP.lon);
+    } else {
+      Serial.println(">> Home 還沒記(用 'homenow' 記當前位置)");
+    }
+  } else if (s == "yawreset") {
+    bodyYawEst = 0;
+    Serial.println(">> bodyYawEst 重置為 0(假設現在機頭朝北)");
   } else {
-    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear、gps");
+    Serial.println(">> 指令：kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear、gps、");
+    Serial.println(">>      wp <lat> <lon> <alt>、wpclear、wpinfo、homenow、home、yawreset");
   }
 }
 
@@ -645,7 +853,7 @@ void debugPrint() {
   if (millis() - lastDbgTime < 200) return;
   lastDbgTime = millis();
 
-  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s",
+  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%02d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s",
                 roll, pitch, yawRate,
                 data.mode, safetyReleased, armed, data.throttle, batteryV,
                 gps_sat, gps_fix ? "FIX" : "---");
@@ -657,6 +865,13 @@ void debugPrint() {
 #if ENABLE_VL53L0X
   Serial.printf(" | F%4dmm B%4dmm", distFront_mm, distBack_mm);
 #endif
+
+  // Mode 02 GPS 導航狀態(有目標才印)
+  if (targetWP.active) {
+    Serial.printf(" | NAV %s d=%.1fm brg=%.0f° yawEst=%.0f° navR=%+.1f navP=%+.1f",
+                  navStateName(navState), distance_to_target, bearing_to_target,
+                  bodyYawEst, navRollSet, navPitchSet);
+  }
 
   Serial.printf(" | PID r%+5.0f p%+5.0f y%+5.0f\n",
                 rollOut, pitchOut, yawOut);
@@ -785,6 +1000,9 @@ void loop() {
 #if ENABLE_VL53L0X
   readToF();
 #endif
+  // Mode 02 GPS 導航(只計算 + 印,沒送進 PID,飛機不會自動飛)
+  // 未來啟用時:在 pidControl 裡偵測 mode==2 → 用 navRollSet 等取代 data.roll/pitch
+  navigateMode02();
   pidControl();
   writeMotors();
   debugPrint();
