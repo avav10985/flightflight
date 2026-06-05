@@ -144,19 +144,18 @@ Telemetry tele;
 bool      teleOK = false;
 bool      sdOK   = false;
 
-// ---- 模式名稱 ----
-// 兩位數 mode 編碼,值為 0/1/2/10/11/12/20/21/22(9 個離散值)。
-// 用 switch 比較安全,避免陣列索引越界。
+// ---- 模式名稱(中文化,2026-06-06)----
+// 兩位數 mode 編碼,值為 0/1/2/10/11/12/20/21/22(9 個離散值)
 const char* getModeName(byte m) {
   switch (m) {
-    case 0:  return "SAFE/CAL";   // 安全 / 校準 / 設定 hub
-    case 1:  return "MANUAL";     // 手動自穩(目前唯一可飛)
-    case 2:  return "GPS-AUTO";   // GPS 自動到目標 + 避障 + 降落
-    case 10: return "VOICE";      // 語音控制(喚醒「啟動」)
-    case 11: return "PC";         // PC 透過 USB 控制
+    case 0:  return "安全校準";   // 安全 / 校準 / 設定 hub
+    case 1:  return "手動自穩";   // 手動自穩(目前唯一可飛)
+    case 2:  return "GPS導航";    // GPS 自動到目標 + 避障 + 降落
+    case 10: return "語音控制";   // 喚醒詞「啟動」
+    case 11: return "電腦控制";   // PC 透過 USB 控制
     case 12: case 20:
-    case 21: case 22:    return "RSVD";  // 預留
-    default:             return "????";  // 無效值(應該不會出現)
+    case 21: case 22:    return "保留";    // 預留
+    default:             return "未知";    // 無效值
   }
 }
 
@@ -197,9 +196,11 @@ int centerMap(int raw, bool reverse) {
 
 byte readSwitch3(int pin) {
   int v = analogRead(pin);
-  if (v > 2730) return 0;   // 上
-  if (v < 1365) return 2;   // 下
-  return 1;                  // 中（開路分壓中點）
+  // 2026-06-06 試燒發現實體開關上下與 ADC 讀值相反,把回傳值對調
+  // 撥到上 = ADC 低電位 → 回傳 0;撥到下 = ADC 高電位 → 回傳 2
+  if (v > 2730) return 2;   // 下
+  if (v < 1365) return 0;   // 上
+  return 1;                  // 中(開路分壓中點)
 }
 
 int readMenuBtn() {
@@ -232,11 +233,13 @@ void readInputs(byte mode) {
 }
 
 void handleMenuCursor() {
+  // 2026-06-06 試燒發現搖桿中位偏離 127 時游標會自己跳,死區從 55/200 改成 15/240
+  // (搖桿要推到接近底才動游標,避免靜止時誤觸)
   static unsigned long lastMove = 0;
   if (millis() - lastMove < 250) return;
   int p = centerMap(analogRead(J_PITCH), false);
-  if (p > 200) { menuCursor = (menuCursor + 1) % N_PARAM;            lastMove = millis(); }
-  if (p < 55)  { menuCursor = (menuCursor - 1 + N_PARAM) % N_PARAM;  lastMove = millis(); }
+  if (p > 240) { menuCursor = (menuCursor + 1) % N_PARAM;            lastMove = millis(); }
+  if (p < 15)  { menuCursor = (menuCursor - 1 + N_PARAM) % N_PARAM;  lastMove = millis(); }
 }
 
 void handleMenuButton(int btn) {
@@ -262,16 +265,16 @@ void drawFlightDynamic(byte mode) {
   char buf[40];
   bool armed = tele.status & STATUS_ARMED;
 
-  // 頂部:模式 + ARM 狀態
-  tft.setTextFont(4);
+  // 頂部:模式 + 武裝狀態
+  tft.setFont(&fonts::efontTW_20);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setCursor(5, 4);
-  snprintf(buf, sizeof(buf), "M%02d %-8s", mode, getModeName(mode));
+  snprintf(buf, sizeof(buf), "M%02d %s", mode, getModeName(mode));
   tft.print(buf);
 
   tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
-  tft.setCursor(170, 4);
-  tft.print(armed ? "ARMED" : " OFF ");
+  tft.setCursor(180, 4);
+  tft.print(armed ? "已武" : "安全");
 
   // 主體:已實作/未實作 切換時清一次
   static byte lastBlock = 255;
@@ -282,53 +285,53 @@ void drawFlightDynamic(byte mode) {
   }
 
   if (!modeImplemented(mode)) {
-    tft.setTextFont(4);
+    tft.setFont(&fonts::efontTW_24);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.setCursor(20, 140);
-    tft.print("MODE NOT");
+    tft.setCursor(40, 140);
+    tft.print("此模式");
     tft.setCursor(40, 175);
-    tft.print("  SET");
+    tft.print("未實作");
   } else {
-    // 直立排版,三個姿態各佔一段(用大字 font 6 或 4)
-    tft.setTextFont(4);
+    // 直立排版,三個姿態各佔一段
+    tft.setFont(&fonts::efontTW_20);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    // Roll
+    // 翻滾
     tft.setCursor(10, 50);
-    tft.print("Roll");
+    tft.print("翻滾");
     tft.setCursor(10, 80);
     snprintf(buf, sizeof(buf), "%+7.1f", tele.roll / 10.0);
     tft.print(buf);
     tft.setCursor(180, 80);
-    tft.print((char)247);  // ° 符號
-    // Pitch
+    tft.print("°");
+    // 俯仰
     tft.setCursor(10, 130);
-    tft.print("Pitch");
+    tft.print("俯仰");
     tft.setCursor(10, 160);
     snprintf(buf, sizeof(buf), "%+7.1f", tele.pitch / 10.0);
     tft.print(buf);
     tft.setCursor(180, 160);
-    tft.print((char)247);
-    // Yaw rate
+    tft.print("°");
+    // 偏航速率
     tft.setCursor(10, 210);
-    tft.print("Yaw");
+    tft.print("偏航");
     tft.setCursor(10, 240);
     snprintf(buf, sizeof(buf), "%+7.1f", tele.yawRate / 10.0);
     tft.print(buf);
-    tft.setCursor(180, 240);
-    tft.print("/s");
+    tft.setCursor(170, 240);
+    tft.print("°/秒");
   }
 
   // 底部狀態列(兩行)
-  tft.setTextFont(2);
+  tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  snprintf(buf, sizeof(buf), "Thr %3d%%   Bat %4.1fV",
+  snprintf(buf, sizeof(buf), "油門 %3d%%   電池 %4.1fV",
            (int)(data.throttle * 100 / 255),
            tele.battery_mV / 1000.0);
   tft.setCursor(5, 285);
   tft.print(buf);
-  snprintf(buf, sizeof(buf), "%-8s   %-2s ",
-           teleOK ? "Link OK" : "Link --",
-           sdOK ? "SD" : "  ");
+  snprintf(buf, sizeof(buf), "%s  %s",
+           teleOK ? "連線" : "斷線",
+           sdOK ? "SD好" : "無SD");
   tft.setCursor(5, 302);
   tft.print(buf);
 }
@@ -338,17 +341,17 @@ void drawMenuStatic() {
   tft.fillRect(0,   0, 240, 32, TFT_PURPLE);
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
-  tft.setTextFont(4);
+  tft.setFont(&fonts::efontTW_20);
   tft.setTextColor(TFT_WHITE, TFT_PURPLE);
-  tft.setCursor(20, 4);
-  tft.print("== PID SETUP ==");
+  tft.setCursor(40, 4);
+  tft.print("═ PID 設定 ═");
 
-  tft.setTextFont(2);
+  tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
   tft.setCursor(5, 285);
-  tft.print("R-stick: cursor  +/-: adj");
+  tft.print("右搖桿:游標  +/-:調值");
   tft.setCursor(5, 302);
-  tft.print("OK: send   Back: exit");
+  tft.print("OK:送出    返回:離開");
 }
 
 void drawMenuDynamic() {
@@ -368,7 +371,7 @@ void drawMenuDynamic() {
       uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
       uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
       tft.fillRect(0, y, 240, rowH, bg);
-      tft.setTextFont(4);
+      tft.setFont(&fonts::efontTW_20);
       tft.setTextColor(fg, bg);
       tft.setCursor(10, y + 10);
       tft.print(sel ? ">" : " ");
@@ -397,17 +400,17 @@ void setup() {
   tft.init();
   tft.setRotation(2);   // 240×320 portrait 翻 180°(實體裝機後上下顛倒,故設 2)
   tft.fillScreen(TFT_BLACK);
-  tft.setTextFont(2);
+  tft.setFont(&fonts::efontTW_16);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(5, 5);
-  tft.print("Drone Ground Station V2-A");
-  tft.setCursor(5, 25);
-  tft.print("Init SPI / NRF24 / SD ...");
+  tft.print("無人機地面站 V2-A");
+  tft.setCursor(5, 28);
+  tft.print("初始化 SPI / NRF24 / SD ...");
 
-  // SPI：NRF24 + SD 共用
+  // SPI:NRF24 + SD 共用
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
-  // NRF24（關鍵連線，先起）
+  // NRF24(關鍵連線,先起)
   radio.begin();
   radio.openWritingPipe(PIPE_OUT);
   radio.setChannel(NRF_CHANNEL);
@@ -416,21 +419,21 @@ void setup() {
   radio.setDataRate(RF24_250KBPS);
   radio.setPALevel(RF24_PA_MAX);
   radio.stopListening();
-  Serial.println("[+] NRF24 ready");
+  Serial.println("[+] NRF24 就緒");
 
-  // SD（選用，沒卡也繼續）
+  // SD(選用,沒卡也繼續)
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
   if (SD.begin(PIN_SD_CS, SPI)) {
     sdOK = true;
-    Serial.println("[+] SD mounted");
+    Serial.println("[+] SD 卡掛載成功");
   } else {
-    Serial.println("[*] SD missing or init failed (繼續)");
+    Serial.println("[*] SD 卡未接或初始化失敗(繼續)");
   }
 
   delay(300);
   drawFlightStatic();
-  Serial.println("Ground Station V2-A Ready");
+  Serial.println("地面站 V2-A 就緒");
 }
 
 // ============================================================
