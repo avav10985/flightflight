@@ -389,6 +389,11 @@ void drawMenuDynamic() {
 void setup() {
   Serial.begin(115200);
 
+  // 關掉 ESP32-S3 板上的 WS2812 RGB LED(常在 GPIO 48,跟我們 TFT CS 共腳)
+  // 在 tft.init() 之前送一次「全 0 = 關燈」訊號,之後 GPIO 48 切換成 SPI CS
+  // 用,LED 會保持上次的狀態(熄滅)。如果你的板 LED 不在 GPIO 48,改下面數字。
+  neopixelWrite(48, 0, 0, 0);
+
   pinMode(SHOULDER_L, INPUT_PULLUP);
   pinMode(SHOULDER_R, INPUT_PULLUP);
   analogReadResolution(12);
