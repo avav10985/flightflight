@@ -395,7 +395,7 @@ void setup() {
 
   // TFT 先起來，方便顯示開機進度
   tft.init();
-  tft.setRotation(0);   // 240×320 portrait(直立)
+  tft.setRotation(2);   // 240×320 portrait 翻 180°(實體裝機後上下顛倒,故設 2)
   tft.fillScreen(TFT_BLACK);
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);

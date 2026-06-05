@@ -76,7 +76,7 @@ void setup() {
   Serial.println("LGFX init...");
 
   display.init();
-  display.setRotation(0);     // 直立 240×320
+  display.setRotation(2);     // 直立 240×320 翻 180°(實體上下顛倒,故設 2)
   display.fillScreen(TFT_BLACK);
 
   // 標題列(藍底白字)
