@@ -83,16 +83,19 @@ public:
 };
 LGFX tft;
 
-// ---- 腳位（V2-A 已定案，見 手把V2_討論摘要.md §4）----
-#define J_THROTTLE   1
-#define J_PITCH      2
-#define J_ROLL       4
+// ---- 腳位（V2-A 已定案,見 手把接線總表_V2.md）----
+// 2026-06-04 GPIO 2 ↔ 10 對調:左搖桿訊號集中右側、右搖桿集中左側
+#define J_THROTTLE   1    // 右#4:左搖桿 Y(油門,拆彈簧)
+#define J_LEFT_X     2    // 右#5:左搖桿 X(可選 yaw,**目前只定義不讀**)
+#define J_ROLL       4    // 左#4:右搖桿 X(roll)
+#define J_PITCH      10   // 左#16:右搖桿 Y(pitch)
 #define SW_A         5
 #define SW_B         6
 #define MENU_BTN     7
 #define SHOULDER_L   8
 #define SHOULDER_R   9
 
+#define PIN_TFT_LED  15   // TFT 背光 PWM(經 A↔C 杜邦 → 副排線 #7 → B 板 TFT LED)
 #define PIN_NRF_CE   41
 #define PIN_NRF_CSN  42
 #define PIN_SPI_SCK  38
@@ -390,6 +393,11 @@ void setup() {
   pinMode(SHOULDER_L, INPUT_PULLUP);
   pinMode(SHOULDER_R, INPUT_PULLUP);
   analogReadResolution(12);
+
+  // TFT 背光 PWM 初始化(必須在 tft.init() 之前,否則 LED 腳浮空 → 背光可能不亮)
+  // 5kHz / 8-bit 解析度,預設 80% 亮度
+  ledcAttach(PIN_TFT_LED, 5000, 8);
+  ledcWrite(PIN_TFT_LED, 200);   // 0~255,200 ≈ 78%
 
   // TFT 先起來，方便顯示開機進度
   tft.init();
