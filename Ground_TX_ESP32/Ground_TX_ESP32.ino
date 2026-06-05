@@ -95,7 +95,8 @@ LGFX tft;
 #define SHOULDER_L   8
 #define SHOULDER_R   9
 
-#define PIN_TFT_LED  15   // TFT 背光 PWM(經 A↔C 杜邦 → 副排線 #7 → B 板 TFT LED)
+// TFT LED:MSP2806 的 LED 腳沒內接 VCC,**直接外接 B 板 3V3 軌常亮**(不走 GPIO/PWM)
+// GPIO 15 因此回歸「真正釋出」可用腳
 #define PIN_NRF_CE   41
 #define PIN_NRF_CSN  42
 #define PIN_SPI_SCK  38
@@ -394,10 +395,8 @@ void setup() {
   pinMode(SHOULDER_R, INPUT_PULLUP);
   analogReadResolution(12);
 
-  // TFT 背光 PWM 初始化(必須在 tft.init() 之前,否則 LED 腳浮空 → 背光可能不亮)
-  // 5kHz / 8-bit 解析度,預設 80% 亮度
-  ledcAttach(PIN_TFT_LED, 5000, 8);
-  ledcWrite(PIN_TFT_LED, 200);   // 0~255,200 ≈ 78%
+  // TFT 背光:MSP2806 的 LED 腳直接接 B 板 3V3 軌常亮,不需要程式控制
+  // (試燒驗證:LED 接 GPIO 15 PWM 不會亮,直接拉 3V3 才亮)
 
   // TFT 先起來，方便顯示開機進度
   tft.init();
