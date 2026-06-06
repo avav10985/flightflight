@@ -80,10 +80,13 @@ LGFX tft;
 
 // ---- 腳位（V2-A 已定案,見 手把接線總表_V2.md）----
 // 2026-06-04 GPIO 2 ↔ 10 對調:左搖桿訊號集中右側、右搖桿集中左側
-#define J_THROTTLE   1    // 右#4:左搖桿 Y(油門,拆彈簧)
-#define J_LEFT_X     2    // 右#5:左搖桿 X(可選 yaw,**目前只定義不讀**)
-#define J_ROLL       4    // 左#4:右搖桿 X(roll)
-#define J_PITCH      10   // 左#16:右搖桿 Y(pitch)
+// 2026-06-07 試燒實測:使用者只接了油門(GPIO 1)+ 右搖桿 Y(GPIO 4)
+//   GPIO 2(左 X)、GPIO 10(右 X) 兩條線還沒接
+//   把 J_PITCH 改到 GPIO 4(有訊號),J_ROLL 留 GPIO 10(以後接 右 X 才動)
+#define J_THROTTLE   1    // 左搖桿 Y(油門,拆彈簧)— ✅ 已接
+#define J_LEFT_X     2    // 左搖桿 X(可選 yaw)— ❌ 還沒接
+#define J_PITCH      4    // 右搖桿 Y(俯仰)— ✅ 已接(從 GPIO 10 對調過來)
+#define J_ROLL      10    // 右搖桿 X(翻滾)— ❌ 還沒接(從 GPIO 4 對調過來)
 #define SW_A         5
 #define SW_B         6
 #define MENU_BTN     7
@@ -215,12 +218,14 @@ byte readSwitch3(int pin) {
   return 1;                  // 中(開路分壓中點)
 }
 
+// 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
+// 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
 int readMenuBtn() {
   int v = analogRead(MENU_BTN);
-  if (v > 3250) return BTN_PLUS;
-  if (v > 2415) return BTN_MINUS;
-  if (v > 1665) return BTN_OK;
-  if (v > 640)  return BTN_BACK;
+  if (v > 3300) return BTN_PLUS;
+  if (v > 2300) return BTN_MINUS;
+  if (v > 1550) return BTN_OK;
+  if (v > 600)  return BTN_BACK;
   return BTN_NONE;
 }
 

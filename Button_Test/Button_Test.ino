@@ -26,10 +26,13 @@
 #define MENU_BTN     7
 #define SHOULDER_L   8
 #define SHOULDER_R   9
-#define J_THROTTLE   1    // 左搖桿 Y(油門,拆彈簧)
-#define J_LEFT_X     2    // 左搖桿 X(偏航 yaw 可選)
-#define J_ROLL       4    // 右搖桿 X(翻滾)
-#define J_PITCH      10   // 右搖桿 Y(俯仰)
+// 2026-06-07 試燒實測對調:
+//   GPIO 4 實際接到右搖桿 Y(原本標的 X 是錯的)→ 改成 J_PITCH
+//   GPIO 10 還沒接任何東西 → 留給將來接 右搖桿 X(J_ROLL)
+#define J_THROTTLE   1    // 左搖桿 Y(油門)— ✅ 已接(主程式會反向)
+#define J_LEFT_X     2    // 左搖桿 X(偏航 可選)— ❌ 還沒接
+#define J_PITCH      4    // 右搖桿 Y(俯仰)— ✅ 已接
+#define J_ROLL      10    // 右搖桿 X(翻滾)— ❌ 還沒接
 
 const char* SW_NAME[3] = { "上", "中", "下" };
 
@@ -40,11 +43,14 @@ byte readSwitch3(int pin) {
   return 1;                  // 中
 }
 
+// 2026-06-07 試燒實測門檻調整:
+//   + 量到 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
+//   取中點當門檻,邊緣最穩
 const char* menuName(int v) {
-  if (v > 3250) return "+   ";
-  if (v > 2415) return "-   ";
-  if (v > 1665) return "OK  ";
-  if (v > 640)  return "返回";
+  if (v > 3300) return "+   ";
+  if (v > 2300) return "-   ";
+  if (v > 1550) return "OK  ";
+  if (v > 600)  return "返回";
   return "無  ";
 }
 
@@ -80,19 +86,19 @@ void loop() {
   bool shldL    = (digitalRead(SHOULDER_L) == LOW);
   bool shldR    = (digitalRead(SHOULDER_R) == LOW);
 
-  int thr_raw   = analogRead(J_THROTTLE);   // 左 Y
-  int leftX_raw = analogRead(J_LEFT_X);     // 左 X
-  int roll_raw  = analogRead(J_ROLL);       // 右 X
-  int pitch_raw = analogRead(J_PITCH);      // 右 Y
+  int thr_raw   = analogRead(J_THROTTLE);   // 左 Y(GPIO 1)
+  int leftX_raw = analogRead(J_LEFT_X);     // 左 X(GPIO 2,還沒接)
+  int pitch_raw = analogRead(J_PITCH);      // 右 Y(GPIO 4)
+  int roll_raw  = analogRead(J_ROLL);       // 右 X(GPIO 10,還沒接)
 
-  Serial.printf("A=%s(%4d) B=%s(%4d) 選單=%s(%4d) 肩L=%s 肩R=%s | 左[Y油門=%4d X偏航=%4d] 右[X翻滾=%4d Y俯仰=%4d] | mode=%02d\n",
+  Serial.printf("A=%s(%4d) B=%s(%4d) 選單=%s(%4d) 肩L=%s 肩R=%s | 左[Y油門=%4d X偏航=%4d] 右[Y俯仰=%4d X翻滾=%4d] | mode=%02d\n",
                 SW_NAME[swA], swA_raw,
                 SW_NAME[swB], swB_raw,
                 menuName(menu_raw), menu_raw,
                 shldL ? "按" : "放",
                 shldR ? "按" : "放",
                 thr_raw, leftX_raw,
-                roll_raw, pitch_raw,
+                pitch_raw, roll_raw,
                 swA * 10 + swB);
 
   delay(200);

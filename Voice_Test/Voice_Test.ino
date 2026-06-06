@@ -131,12 +131,13 @@ uint32_t      playTotal  = 0;
 
 // ============================================================
 // 按鈕讀取(電阻階梯,同 Ground_TX_ESP32 的門檻)
+// 2026-06-07 試燒實測門檻(+ 3830、− 2660、OK 1925、返回 1180)取中點
 int readMenuBtn() {
   int v = analogRead(PIN_MENU_BTN);
-  if (v > 3250) return BTN_PLUS;
-  if (v > 2415) return BTN_MINUS;
-  if (v > 1665) return BTN_OK;
-  if (v >  640) return BTN_BACK;
+  if (v > 3300) return BTN_PLUS;
+  if (v > 2300) return BTN_MINUS;
+  if (v > 1550) return BTN_OK;
+  if (v >  600) return BTN_BACK;
   return BTN_NONE;
 }
 
