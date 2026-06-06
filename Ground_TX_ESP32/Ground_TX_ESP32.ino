@@ -52,7 +52,7 @@ public:
       cfg.freq_read   = 16000000;
       cfg.pin_sclk    = 38;                // 跟 NRF24/SD 共用(設計如此)
       cfg.pin_mosi    = 39;                // 同上
-      cfg.pin_miso    = -1;                // 不接(tyty 也是 -1,我們也不用讀)
+      cfg.pin_miso    = 40;                // 跟 SD 共用 SPI 必須設 40,否則 SD 拿不到 MISO 掛載失敗
       cfg.pin_dc      = 21;
       _bus_instance.config(cfg);
       _panel_instance.setBus(&_bus_instance);
@@ -97,7 +97,8 @@ LGFX tft;
 #define PIN_SPI_SCK  38
 #define PIN_SPI_MOSI 39
 #define PIN_SPI_MISO 40
-#define PIN_SD_CS    0   // BOOT 腳，外部 10k 上拉到 3V3，開機 HIGH 安全
+#define PIN_SD_CS   47   // 真正釋出腳,不用上拉電阻(2026-06-06 從 GPIO 0 改過來)
+                         // SD 模組 VCC 接 5V 軌(模組內含電平轉換 IC 需要 5V 才工作)
 
 // ---- 方向反轉（測試後不對就改）----
 const bool REV_THROTTLE = true;
@@ -401,21 +402,11 @@ void setup() {
   // TFT 背光:MSP2806 的 LED 腳直接接 B 板 3V3 軌常亮,不需要程式控制
   // (試燒驗證:LED 接 GPIO 15 PWM 不會亮,直接拉 3V3 才亮)
 
-  // TFT 先起來，方便顯示開機進度
-  tft.init();
-  tft.setRotation(2);   // 240×320 portrait 翻 180°(實體裝機後上下顛倒,故設 2)
-  tft.fillScreen(TFT_BLACK);
-  tft.setFont(&fonts::efontTW_16);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(5, 5);
-  tft.print("無人機地面站 V2-A");
-  tft.setCursor(5, 28);
-  tft.print("初始化 SPI / NRF24 / SD ...");
-
-  // SPI:NRF24 + SD 共用
+  // === SPI / NRF24 / SD 先 init,TFT 後加入共用 ===
+  // 順序顛倒(TFT 先)會讓 SD 拿不到 MISO 掛載失敗(2026-06-06 試燒實證)
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
-  // NRF24(關鍵連線,先起)
+  // NRF24
   radio.begin();
   radio.openWritingPipe(PIPE_OUT);
   radio.setChannel(NRF_CHANNEL);
@@ -435,6 +426,18 @@ void setup() {
   } else {
     Serial.println("[*] SD 卡未接或初始化失敗(繼續)");
   }
+
+  // TFT(SD 之後 init,共用 SPI bus_shared 模式)
+  tft.init();
+  tft.setRotation(2);   // 240×320 portrait 翻 180°
+  tft.fillScreen(TFT_BLACK);
+  tft.setFont(&fonts::efontTW_16);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(5, 5);
+  tft.print("無人機地面站 V2-A");
+  tft.setCursor(5, 28);
+  if (sdOK) tft.print("SD: 已掛載");
+  else      tft.print("SD: 未接(繼續)");
 
   delay(300);
   drawFlightStatic();
