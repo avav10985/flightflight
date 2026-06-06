@@ -255,7 +255,7 @@ void drawMenuStatic() {
   tft.fillRect(0,   0, 240, 32, TFT_NAVY);
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
-  tft.setFont(&fonts::efontTW_20);
+  tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setCursor(30, 4);
   tft.print("錄音播放測試");
@@ -309,7 +309,7 @@ void drawRecStatic() {
   tft.fillRect(0,   0, 240, 32, TFT_RED);
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
-  tft.setFont(&fonts::efontTW_20);
+  tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_RED);
   tft.setCursor(60, 4);
   tft.print("● 錄音中");
@@ -340,7 +340,7 @@ void drawPlayStatic() {
   tft.fillRect(0,   0, 240, 32, TFT_DARKGREEN);
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
-  tft.setFont(&fonts::efontTW_20);
+  tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   tft.setCursor(75, 4);
   tft.print("▶ 播放中");

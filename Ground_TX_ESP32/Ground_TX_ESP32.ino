@@ -266,7 +266,7 @@ void drawFlightDynamic(byte mode) {
   bool armed = tele.status & STATUS_ARMED;
 
   // 頂部:模式 + 武裝狀態
-  tft.setFont(&fonts::efontTW_20);
+  tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setCursor(5, 4);
   snprintf(buf, sizeof(buf), "M%02d %s", mode, getModeName(mode));
@@ -293,7 +293,7 @@ void drawFlightDynamic(byte mode) {
     tft.print("未實作");
   } else {
     // 直立排版,三個姿態各佔一段
-    tft.setFont(&fonts::efontTW_20);
+    tft.setFont(&fonts::efontTW_24);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     // 翻滾
     tft.setCursor(10, 50);
@@ -341,7 +341,7 @@ void drawMenuStatic() {
   tft.fillRect(0,   0, 240, 32, TFT_PURPLE);
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY);
 
-  tft.setFont(&fonts::efontTW_20);
+  tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_PURPLE);
   tft.setCursor(40, 4);
   tft.print("═ PID 設定 ═");
@@ -371,7 +371,7 @@ void drawMenuDynamic() {
       uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
       uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
       tft.fillRect(0, y, 240, rowH, bg);
-      tft.setFont(&fonts::efontTW_20);
+      tft.setFont(&fonts::efontTW_24);
       tft.setTextColor(fg, bg);
       tft.setCursor(10, y + 10);
       tft.print(sel ? ">" : " ");
