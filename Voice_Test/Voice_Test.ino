@@ -93,8 +93,10 @@ LGFX tft;
 #define PIN_SHOULDER_L   8
 
 // === 錄音參數 ===
-#define SAMPLE_RATE     16000
-#define BUF_SAMPLES     512               // 每次 I²S 讀寫 sample 數
+// 16 kHz 會讓 BCLK = 1.024 MHz,低於 INMP441 規格最小 1.45 MHz 出怪雜訊
+// 32 kHz → BCLK = 2.048 MHz,在 INMP441 規格內(1.45~3.27 MHz)
+#define SAMPLE_RATE     32000
+#define BUF_SAMPLES     512               // 每次 I²S 讀寫 sample 數(32 kHz 下約 16ms)
 #define MAX_REC_SECS    30
 #define MAX_FILES       20                // TFT 上最多顯示這麼多檔
 
