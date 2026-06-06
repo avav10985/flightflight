@@ -488,7 +488,20 @@ void setup() {
   pinMode(PIN_SHOULDER_L, INPUT_PULLUP);
   analogReadResolution(12);
 
-  // TFT
+  // === 重要:SPI + SD 先 init,再讓 LovyanGFX 加入共用 ===
+  // 順序顛倒(TFT 先)會讓 SD 拿不到 MISO,掛載失敗。
+  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
+  if (SD.begin(PIN_SD_CS, SPI)) {
+    sdOK = true;
+    Serial.println("[+] SD 掛載成功");
+  } else {
+    Serial.println("[!] SD 掛載失敗");
+    // 注意:TFT 還沒 init,先用 Serial 印,後面 tft.init() 後再上紅字
+  }
+
+  // TFT(SD 之後才 init,讓 SD 先佔到正確的 SPI 設定)
   tft.init();
   tft.setRotation(2);
   tft.fillScreen(TFT_BLACK);
@@ -499,15 +512,8 @@ void setup() {
   tft.setCursor(5, 28);
   tft.print("初始化中...");
 
-  // SPI + SD
-  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
-  pinMode(PIN_SD_CS, OUTPUT);
-  digitalWrite(PIN_SD_CS, HIGH);
-  if (SD.begin(PIN_SD_CS, SPI)) {
-    sdOK = true;
-    Serial.println("[+] SD 掛載成功");
-  } else {
-    Serial.println("[!] SD 掛載失敗");
+  // 如果 SD 失敗,TFT 上補紅字然後停在這
+  if (!sdOK) {
     tft.setCursor(5, 55);
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.print("SD 掛載失敗!");
