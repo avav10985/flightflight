@@ -172,6 +172,9 @@ void writeWavHeader(File &f, uint32_t dataLen) {
 // I²S 初始化(full-duplex,共用 BCLK/WS,RX/TX 不同 slot_mask)
 void initI2S() {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  // 加大 DMA buffer 避免 TFT/SD 卡到 timing 時樣本掉資料
+  chan_cfg.dma_desc_num  = 8;       // 預設 6
+  chan_cfg.dma_frame_num = 512;     // 預設 240 → 32kHz 下 ~16ms × 8 desc = 128ms 緩衝
   i2s_new_channel(&chan_cfg, &i2s_tx, &i2s_rx);
 
   // 共用 GPIO 配置
@@ -406,8 +409,8 @@ void doRecChunk() {
   int samples = bytesRead / 4;
   int16_t pcm[BUF_SAMPLES];
   for (int i = 0; i < samples; i++) {
-    // INMP441 24-bit MSB-aligned 在 32-bit slot,右移 14 提升輕聲音量
-    int32_t v = raw[i] >> 14;
+    // INMP441 24-bit MSB-aligned 在 32-bit slot,右移 16 直接取高 16 bit(無增益,最不容易爆音)
+    int32_t v = raw[i] >> 16;
     if (v >  32767) v =  32767;
     if (v < -32768) v = -32768;
     pcm[i] = (int16_t)v;
