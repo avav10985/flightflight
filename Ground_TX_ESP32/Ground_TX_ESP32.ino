@@ -100,6 +100,17 @@ LGFX tft;
 #define PIN_SD_CS   47   // 真正釋出腳,不用上拉電阻(2026-06-06 從 GPIO 0 改過來)
                          // SD 模組 VCC 接 5V 軌(模組內含電平轉換 IC 需要 5V 才工作)
 
+// ====== V2-B 跟其他 feature 旗標(2026-06-06)======
+// 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**
+#define ENABLE_PC_MODE11        0   // Mode 11:PC 透過 USB Serial 控制飛機(透明橋接)
+#define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
+#define ENABLE_MUSIC            0   // 任意 mode 都可放音樂(需 SD + MAX98357A)
+#define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
+#define PIN_I2S_BCLK   11           // V2-B 語音模組腳位(共用 INMP441 + MAX98357A)
+#define PIN_I2S_WS     12
+#define PIN_I2S_DOUT   13           // → MAX98357A DIN
+#define PIN_I2S_DIN    14           // INMP441 SD →
+
 // ---- 方向反轉（測試後不對就改）----
 const bool REV_THROTTLE = true;
 const bool REV_PITCH    = true;
@@ -492,3 +503,232 @@ void loop() {
 
   delay(20);   // 約 50Hz
 }
+
+
+// ============================================================
+// ============================================================
+//                  以下都是 feature 骨架
+//   ENABLE_XXX 旗標 = 0 時不會啟用,只是先把架構放這方便將來補
+// ============================================================
+// ============================================================
+
+
+// ============================================================
+// Mode 11:PC 控制(USB CDC 透明橋接)
+//
+// 開啟方法:#define ENABLE_PC_MODE11 1
+//
+// 使用流程:
+// 1. PC 用 USB 接手把(會佔用 Serial 0,無法看 debug log)
+// 2. 撥到 mode = 11(SW_A 中 + SW_B 中),手把進入 PC 橋接模式
+// 3. PC 端 app 透過 USB Serial 送 13-byte PcCommand,手把轉成 Signal 送 NRF24
+// 4. NRF24 回的 telemetry 透過 USB Serial 回 PC
+//
+// PC 端 app 建議:Python + pyserial + pygame.joystick + opencv(相機影像)
+// 詳細實作等使用者要做時再細談
+// ============================================================
+#if ENABLE_PC_MODE11
+struct PcCommand {
+  uint8_t startByte;    // 必須 0xAA
+  uint8_t throttle, pitch, roll, yaw;
+  uint8_t mode;         // PC 可強制覆蓋手把開關位置
+  uint8_t flags;
+  uint8_t paramID;
+  float   paramVal;
+  uint8_t checksum;     // sum of bytes 1~11 取低 8 bit
+};
+
+void pcBridgeUpdate(Signal& sig) {
+  // 從 USB Serial 讀 PC 指令,覆蓋 sig
+  if (Serial.available() >= (int)sizeof(PcCommand)) {
+    PcCommand cmd;
+    Serial.readBytes((uint8_t*)&cmd, sizeof(cmd));
+    if (cmd.startByte != 0xAA) return;
+    // TODO:checksum 驗證
+    sig.throttle = cmd.throttle;
+    sig.pitch    = cmd.pitch;
+    sig.roll     = cmd.roll;
+    sig.yaw      = cmd.yaw;
+    sig.mode     = cmd.mode;
+    sig.flags    = cmd.flags;
+    sig.paramID  = cmd.paramID;
+    sig.paramVal = cmd.paramVal;
+  }
+  // 把當前 telemetry 推給 PC(每次都送,讓 PC 端隨時有最新狀態)
+  Serial.write((const uint8_t*)&tele, sizeof(Telemetry));
+}
+#endif
+
+
+// ============================================================
+// Mode 10:AI 語音控制
+//
+// 開啟方法:#define ENABLE_VOICE_MODE10 1 + 建立 secrets.h 含:
+//   WIFI_SSID / WIFI_PASS
+//   WIT_AI_TOKEN(免費,Wit.ai 中文 STT)
+//   GROQ_API_KEY(免費 14400 req/day,Llama 3.3)
+//   VOICERSS_API_KEY(免費 350 req/day,中文 TTS)
+//
+// 流程:
+//   ESP-SR 監聽喚醒詞「啟動」(本地,免雲端)
+//   ↓ 偵測到
+//   錄音 5 秒 → 上傳 Wit.ai → 取得 STT 結果(中文文字)
+//   ↓
+//   比對本地指令清單(起飛/降落/返航/懸停/聊天/取消/狀態/加速/減速)
+//   ↓ 是本地指令 → 直接執行(改 Signal.mode 或 flags)
+//   ↓ 否則 → 送 Groq LLM 取得對話回應 → 上傳 VoiceRSS 取得 MP3 → 播放
+//
+// 詳細申請 API key 跟 ESP-SR 設定 在 [[mode-10-ai-voice-apis]] 記憶
+// ============================================================
+#if ENABLE_VOICE_MODE10
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include "secrets.h"   // 自己建立,git ignore
+
+enum VoiceState { VS_IDLE, VS_WAKE, VS_RECORDING, VS_STT, VS_LLM, VS_TTS, VS_PLAY };
+VoiceState voiceState = VS_IDLE;
+
+const char* LOCAL_CMDS[] = {
+  "啟動", "起飛", "降落", "返航", "懸停",
+  "取消", "狀態", "加速", "減速", "聊天"
+};
+
+void initVoice() {
+  // WiFi 連線
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) { delay(500); }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[+] WiFi:%s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("[!] WiFi 連線失敗,Mode 10 雲端 STT/LLM/TTS 無法使用");
+  }
+  // TODO:ESP-SR MultiNet 載入「啟動」喚醒詞模型
+}
+
+void voiceUpdate() {
+  // 狀態機:每次 loop 呼叫一次,各狀態做一小段工作避免卡 NRF24
+  switch (voiceState) {
+    case VS_IDLE:
+      // TODO:if (espSrDetectWakeWord("啟動")) voiceState = VS_WAKE;
+      break;
+    case VS_WAKE:
+      // TODO:嗶提示音 → voiceState = VS_RECORDING
+      break;
+    case VS_RECORDING:
+      // TODO:錄音 5 秒到 PSRAM buffer
+      break;
+    case VS_STT:
+      // TODO:HTTPS POST 到 https://api.wit.ai/speech,header WIT_AI_TOKEN
+      break;
+    case VS_LLM:
+      // TODO:HTTPS POST 到 https://api.groq.com/openai/v1/chat/completions
+      break;
+    case VS_TTS:
+      // TODO:HTTPS GET https://api.voicerss.org/?key=...&hl=zh-tw&src=回應
+      break;
+    case VS_PLAY:
+      // TODO:解 MP3 推 I²S → MAX98357A
+      break;
+  }
+}
+#endif
+
+
+// ============================================================
+// 音樂播放(SD 上 /music/*.WAV → I²S → MAX98357A)
+//
+// 開啟:#define ENABLE_MUSIC 1
+// 觸發:常駐選單 → 「音樂」項目 → 選曲 → OK 播放
+//      或 Mode 10 語音「啟動 → 放音樂」
+//
+// 優先級:警示音 > Mode 10 語音回應 > 背景音樂
+// 預設音量 60%,Mode 10 識別期間自動降到 20%
+// ============================================================
+#if ENABLE_MUSIC
+File     musicFile;
+bool     musicPlaying = false;
+uint8_t  musicVolume  = 60;     // 0~100
+
+void musicPlay(const char* path) {
+  if (musicPlaying) { musicFile.close(); }
+  musicFile = SD.open(path, FILE_READ);
+  if (!musicFile) { Serial.printf("[!] 開不了 %s\n", path); return; }
+  musicFile.seek(44);   // 跳 WAV header
+  musicPlaying = true;
+  Serial.printf("[+] 播放 %s\n", path);
+}
+
+void musicStop() {
+  if (musicPlaying) { musicFile.close(); musicPlaying = false; }
+}
+
+void musicUpdate() {
+  if (!musicPlaying) return;
+  // TODO:讀一塊 SD chunk → 套音量 → 寫 I²S
+  // 若播完(file.available()==0)→ musicStop()
+}
+
+// 列出 SD /music/ 資料夾的所有 .WAV 檔(常駐選單呼叫)
+int musicListFiles(String list[], int maxN) {
+  int n = 0;
+  File dir = SD.open("/music");
+  if (!dir) return 0;
+  while (n < maxN) {
+    File f = dir.openNextFile();
+    if (!f) break;
+    String name = f.name();
+    if (name.endsWith(".WAV") || name.endsWith(".wav")) list[n++] = name;
+    f.close();
+  }
+  dir.close();
+  return n;
+}
+#endif
+
+
+// ============================================================
+// 常駐選單(任何 mode TFT 下方 30px 區域常駐顯示)
+//
+// 開啟:#define ENABLE_PERSISTENT_MENU 1
+// 進入:肩鍵 L 長按 1 秒
+// 操作:+ - 切換項目,OK 進入該功能,返回 退出
+// 項目:音樂、亮度(預留,MSP2806 LED 直連 3V3 無法軟控)、系統資訊
+//
+// 設計上跟 mode 0 的 PID 選單分開:那是「設定」,常駐選單是「附屬功能」
+// ============================================================
+#if ENABLE_PERSISTENT_MENU
+enum PMItem { PM_MUSIC, PM_BRIGHTNESS, PM_INFO, PM_COUNT };
+const char* PM_NAMES[PM_COUNT] = { "音樂", "亮度", "系統資訊" };
+
+bool          pmActive       = false;
+int           pmCursor       = 0;
+unsigned long pmShoulderDown = 0;   // 用來偵測長按
+
+void persistentMenuUpdate() {
+  bool shldL = (digitalRead(SHOULDER_L) == LOW);
+  if (shldL) {
+    if (pmShoulderDown == 0) pmShoulderDown = millis();
+    else if (millis() - pmShoulderDown > 1000 && !pmActive) {
+      pmActive = true;
+      // TODO:暫停其他 UI 重畫,畫常駐選單
+    }
+  } else {
+    pmShoulderDown = 0;
+  }
+  // pmActive 時 + - 改 cursor,OK 進入該功能,返回 退出
+  // TODO
+}
+
+void persistentMenuDraw() {
+  // 在 TFT 底部畫常駐選單
+  // TODO:fillRect 區域 + 畫 PM_NAMES[pmCursor]
+}
+#endif
+
+
+// ============================================================
+// ============================================================
+//        以上 feature 旗標都 0,以下空函式不會被呼叫
+// ============================================================
+// ============================================================

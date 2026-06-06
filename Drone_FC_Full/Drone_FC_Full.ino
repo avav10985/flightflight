@@ -149,10 +149,12 @@ float         altitude_m   = 0;
 #endif
 
 #if ENABLE_VL53L0X
-Adafruit_VL53L0X tof0;     // CH0 前方
-Adafruit_VL53L0X tof1;     // CH1 後方
-bool          tof0OK = false, tof1OK = false;
-uint16_t      distFront_mm = 0, distBack_mm = 0;
+// 4 顆 VL53L0X 透過 TCA9548A 多工器:CH0 前中、CH1 前左、CH2 前右、CH3 底部
+Adafruit_VL53L0X tofs[4];
+bool          tofOK[4]  = { false, false, false, false };
+uint16_t      tofDist[4] = { 0, 0, 0, 0 };       // 各方向距離(mm)
+const uint16_t OBSTACLE_THRESHOLD_MM = 1800;     // 任一前雷射 < 1.8m → 避障
+const uint16_t LANDING_TRIGGER_MM    = 300;      // 底部 < 30cm → 觸發接地
 #endif
 
 Signal        data;
@@ -614,18 +616,36 @@ void readBMP280() {
 
 #if ENABLE_VL53L0X
 void readToF() {
-  if (tof0OK) {
-    tcaSelect(0);
+  for (int ch = 0; ch < 4; ch++) {
+    if (!tofOK[ch]) continue;
+    tcaSelect(ch);
     VL53L0X_RangingMeasurementData_t m;
-    tof0.rangingTest(&m, false);
-    distFront_mm = (m.RangeStatus != 4) ? m.RangeMilliMeter : 0;
+    tofs[ch].rangingTest(&m, false);
+    tofDist[ch] = (m.RangeStatus != 4) ? m.RangeMilliMeter : 0;
   }
-  if (tof1OK) {
-    tcaSelect(1);
-    VL53L0X_RangingMeasurementData_t m;
-    tof1.rangingTest(&m, false);
-    distBack_mm = (m.RangeStatus != 4) ? m.RangeMilliMeter : 0;
+}
+
+// 避障 helper:三顆前雷射任一 < 1.8m → true
+bool tofObstacleDetected() {
+  for (int ch = 0; ch < 3; ch++) {                 // CH0/1/2 = 前面三顆
+    if (tofOK[ch] && tofDist[ch] > 0 && tofDist[ch] < OBSTACLE_THRESHOLD_MM) return true;
   }
+  return false;
+}
+
+// 找最 clear 的方向(供 Mode 02 避障旋轉決定):0=中、-1=左、+1=右
+int tofClearestDir() {
+  uint16_t center = tofOK[0] ? tofDist[0] : 0;
+  uint16_t left   = tofOK[1] ? tofDist[1] : 0;
+  uint16_t right  = tofOK[2] ? tofDist[2] : 0;
+  if (center >= left && center >= right) return  0;
+  if (left   >  right)                   return -1;
+  return +1;
+}
+
+// 底部雷射:接近地面 → 觸發接地降落
+bool tofLandingTrigger() {
+  return tofOK[3] && tofDist[3] > 0 && tofDist[3] < LANDING_TRIGGER_MM;
 }
 #endif
 
@@ -1060,21 +1080,32 @@ void initBMP280() {
 #endif
 
 #if ENABLE_VL53L0X
+// 4 顆 VL53L0X 透過 TCA9548A I²C 多工器(避免位址衝突)
+// CH0 = 前中、CH1 = 前左、CH2 = 前右、CH3 = 底部(降落輔助)
+const char* TOF_NAMES[4] = { "前中", "前左", "前右", "底部" };
+
 void initToF() {
-  tcaSelect(0);
-  if (tof0.begin(0x29)) {
-    tof0OK = true;
-    Serial.println("[+] VL53L0X #1 (前): OK");
-  } else {
-    Serial.println("[!] VL53L0X #1 (前): FAIL");
+  for (int ch = 0; ch < 4; ch++) {
+    tcaSelect(ch);
+    delay(50);
+    if (tofs[ch].begin(0x29)) {
+      tofOK[ch] = true;
+      Serial.printf("[+] VL53L0X #%d (%s): OK\n", ch, TOF_NAMES[ch]);
+    } else {
+      tofOK[ch] = false;
+      Serial.printf("[!] VL53L0X #%d (%s): FAIL\n", ch, TOF_NAMES[ch]);
+    }
   }
-  tcaSelect(1);
-  if (tof1.begin(0x29)) {
-    tof1OK = true;
-    Serial.println("[+] VL53L0X #2 (後): OK");
-  } else {
-    Serial.println("[!] VL53L0X #2 (後): FAIL");
-  }
+}
+
+// 讀單顆 VL53L0X 距離(mm)。回 -1 = 超出範圍或讀失敗
+int16_t tofRead(uint8_t ch) {
+  if (ch > 3 || !tofOK[ch]) return -1;
+  tcaSelect(ch);
+  VL53L0X_RangingMeasurementData_t m;
+  tofs[ch].rangingTest(&m, false);
+  if (m.RangeStatus != 4) return m.RangeMilliMeter;
+  return -1;
 }
 #endif
 
