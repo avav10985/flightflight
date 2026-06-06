@@ -1,5 +1,5 @@
 // ============================================================
-// Button_Test — 所有手把輸入元件測試
+// Button_Test — 所有手把輸入元件測試(含搖桿)
 //
 // 測試對象(全部 V2-A 輸入):
 //   SW_A 三段開關  GPIO 5(類比分壓,上/中/下)
@@ -7,18 +7,18 @@
 //   選單階梯按鈕   GPIO 7(類比階梯 + / − / OK / 返回)
 //   肩鍵 L        GPIO 8(數位 + 內部上拉)
 //   肩鍵 R        GPIO 9(數位 + 內部上拉)
+//   左搖桿 Y(油門)GPIO 1(類比 0~4095,中位 ~ 2048)
+//   左搖桿 X(偏航)GPIO 2
+//   右搖桿 X(翻滾)GPIO 4
+//   右搖桿 Y(俯仰)GPIO 10
 //
 // === 用法 ===
 // 1. 燒上去,開 Serial Monitor (115200)
-// 2. 撥開關 / 按按鈕 / 按肩鍵
+// 2. 撥開關 / 按按鈕 / 推搖桿 / 按肩鍵
 // 3. **觀察原始 ADC 值**,以此校準門檻
 //
 // 例如:按「-」如果顯示 ADC = 1900(落在 OK 範圍 1665~2415),
 //      代表 OK 跟「-」的門檻寫錯了 → 看實際值重設
-//
-// === Serial 輸出格式 ===
-// SW_A=中(2048)  SW_B=上(4095)  選單=無( 50)  肩L=放 肩R=放  mode=01
-// SW_A=下( 100)  SW_B=中(2048)  選單=+(3500)  肩L=按 肩R=放  mode=20
 // ============================================================
 
 #define SW_A         5
@@ -26,6 +26,10 @@
 #define MENU_BTN     7
 #define SHOULDER_L   8
 #define SHOULDER_R   9
+#define J_THROTTLE   1    // 左搖桿 Y(油門,拆彈簧)
+#define J_LEFT_X     2    // 左搖桿 X(偏航 yaw 可選)
+#define J_ROLL       4    // 右搖桿 X(翻滾)
+#define J_PITCH      10   // 右搖桿 Y(俯仰)
 
 const char* SW_NAME[3] = { "上", "中", "下" };
 
@@ -68,20 +72,27 @@ void setup() {
 }
 
 void loop() {
-  int swA_raw  = analogRead(SW_A);
-  int swB_raw  = analogRead(SW_B);
-  int menu_raw = analogRead(MENU_BTN);
-  byte swA     = readSwitch3(SW_A);
-  byte swB     = readSwitch3(SW_B);
-  bool shldL   = (digitalRead(SHOULDER_L) == LOW);
-  bool shldR   = (digitalRead(SHOULDER_R) == LOW);
+  int swA_raw   = analogRead(SW_A);
+  int swB_raw   = analogRead(SW_B);
+  int menu_raw  = analogRead(MENU_BTN);
+  byte swA      = readSwitch3(SW_A);
+  byte swB      = readSwitch3(SW_B);
+  bool shldL    = (digitalRead(SHOULDER_L) == LOW);
+  bool shldR    = (digitalRead(SHOULDER_R) == LOW);
 
-  Serial.printf("SW_A=%s(%4d)  SW_B=%s(%4d)  選單=%s(%4d)  肩L=%s 肩R=%s  mode=%02d\n",
+  int thr_raw   = analogRead(J_THROTTLE);   // 左 Y
+  int leftX_raw = analogRead(J_LEFT_X);     // 左 X
+  int roll_raw  = analogRead(J_ROLL);       // 右 X
+  int pitch_raw = analogRead(J_PITCH);      // 右 Y
+
+  Serial.printf("A=%s(%4d) B=%s(%4d) 選單=%s(%4d) 肩L=%s 肩R=%s | 左[Y油門=%4d X偏航=%4d] 右[X翻滾=%4d Y俯仰=%4d] | mode=%02d\n",
                 SW_NAME[swA], swA_raw,
                 SW_NAME[swB], swB_raw,
                 menuName(menu_raw), menu_raw,
                 shldL ? "按" : "放",
                 shldR ? "按" : "放",
+                thr_raw, leftX_raw,
+                roll_raw, pitch_raw,
                 swA * 10 + swB);
 
   delay(200);
