@@ -54,7 +54,7 @@ public:
       cfg.freq_read   = 16000000;
       cfg.pin_sclk    = 38;
       cfg.pin_mosi    = 39;
-      cfg.pin_miso    = -1;
+      cfg.pin_miso    = 40;   // 跟 SD 共用 SPI 時必須設,不然 SPI.begin 重新註冊 MISO 會失敗
       cfg.pin_dc      = 21;
       _bus_instance.config(cfg);
       _panel_instance.setBus(&_bus_instance);
