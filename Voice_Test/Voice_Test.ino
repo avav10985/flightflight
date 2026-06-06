@@ -85,7 +85,7 @@ LGFX tft;
 #define PIN_I2S_WS      12
 #define PIN_I2S_DOUT    13      // ESP32 → MAX98357A DIN
 #define PIN_I2S_DIN     14      // INMP441 SD → ESP32
-#define PIN_SD_CS        0
+#define PIN_SD_CS       47   // 右側自由腳,不用上拉電阻,跟 38/39/40 SPI 軌靠近
 #define PIN_SPI_SCK     38
 #define PIN_SPI_MOSI    39
 #define PIN_SPI_MISO    40

@@ -34,7 +34,9 @@
 #include <SPI.h>
 #include <SD.h>
 
-#define PIN_SD_CS    0
+// CS = GPIO 47(右側自由腳,不用上拉電阻,接線方便)
+// 如果要用 GPIO 0(BOOT 腳)需要 R11 10kΩ 上拉到 3V3,否則進燒錄模式
+#define PIN_SD_CS    47
 #define PIN_SPI_SCK  38
 #define PIN_SPI_MOSI 39
 #define PIN_SPI_MISO 40
