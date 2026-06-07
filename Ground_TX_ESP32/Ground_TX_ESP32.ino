@@ -113,7 +113,7 @@ LGFX tft;
 #define PIN_I2S_WS     12
 #define PIN_I2S_DOUT   13           // → MAX98357A DIN
 #define PIN_I2S_DIN    14           // INMP441 SD →
-#define PIN_AMP_SD     17           // MAX98357A SD(shutdown):LOW=休眠靜音、HIGH=啟用
+#define PIN_AMP_SD     18           // MAX98357A SD(shutdown):LOW=休眠靜音、HIGH=啟用
                                     // 預設拉低消除「沙沙」雜訊,Mode 10 / 音樂 要播放時設 HIGH
 
 // ---- 方向反轉（測試後不對就改）----

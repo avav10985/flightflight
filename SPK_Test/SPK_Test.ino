@@ -32,7 +32,7 @@
 #define PIN_BCLK    11
 #define PIN_WS      12
 #define PIN_DOUT    13
-#define PIN_AMP_SD  17   // MAX98357A SD,HIGH=啟用、LOW=休眠靜音
+#define PIN_AMP_SD  18   // MAX98357A SD,HIGH=啟用、LOW=休眠靜音
 
 #define SAMPLE_RATE 16000
 #define TONE_FREQ   440.0f      // A4「La」音
