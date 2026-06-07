@@ -240,6 +240,33 @@ void printAll() {
   Serial.println("---");
 }
 
+void scanI2C() {
+  Serial.println("[I²C Scan] 掃描 0x01~0x7F...");
+  byte found = 0;
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      const char* name = "?";
+      if (addr == 0x68) name = "MPU6050";
+      else if (addr == 0x69) name = "MPU6050(AD0=VCC)";
+      else if (addr == 0x76) name = "BMP280";
+      else if (addr == 0x77) name = "BMP280(SDO=VCC)";
+      else if (addr == 0x1E) name = "HMC5883L 磁力計";
+      else if (addr == 0x0D) name = "QMC5883 磁力計";
+      else if (addr == 0x70) name = "TCA9548A 多工器";
+      else if (addr == 0x29) name = "VL53L0X(可能在 TCA 通道後)";
+      Serial.printf("  0x%02X  ← %s\n", addr, name);
+      found++;
+    }
+  }
+  Serial.printf("[I²C Scan] 找到 %d 個元件\n", found);
+  if (found == 0) {
+    Serial.println("       ⚠️ I²C 主幹完全沒回應 → SDA/SCL 沒接好 或 bus 短路");
+  } else if (found == 1) {
+    Serial.println("       ⚠️ 只 1 個元件回應 → 其他元件電源/接線/I²C 拉線可能有問題");
+  }
+}
+
 void printHelp() {
   Serial.println("\n=== 指令 ===");
   Serial.println("  help       此說明");
@@ -249,6 +276,7 @@ void printHelp() {
   Serial.println("  mag        磁力計");
   Serial.println("  bmp        氣壓 / 高度");
   Serial.println("  bat        電池電壓");
+  Serial.println("  scan       I²C 掃描(找有哪些位址在線上)");
   Serial.println("  all        一次印全部");
   Serial.println("  m <pwm>    4 顆馬達同時設 PWM(1000~2000)");
   Serial.println("  m1 <pwm>   只 M1(M2/M3/M4 同理)");
@@ -271,6 +299,7 @@ void handleSerial() {
   else if (s == "bmp")  printBMP();
   else if (s == "bat")  printBat();
   else if (s == "all")  printAll();
+  else if (s == "scan") scanI2C();
   else if (s == "stop") setMotorAll(1000);
   else if (s.startsWith("m ")) {
     setMotorAll(s.substring(2).toInt());
