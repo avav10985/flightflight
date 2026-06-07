@@ -218,6 +218,10 @@ byte readSwitch3(int pin) {
   return 1;                  // 中(開路分壓中點)
 }
 
+// 全 redraw flag:drawFlightStatic 設 true,drawFlightDynamic 第一次跑會強制重畫所有
+// (從 PID 選單返回後 mode 沒變但畫面被清掉,沒這個會空一片)
+bool g_flightDirty = false;
+
 // 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
 // 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
 int readMenuBtn() {
@@ -250,17 +254,17 @@ void readInputs(byte mode) {
 }
 
 void handleMenuCursor() {
-  // 2026-06-06 試燒發現搖桿中位偏離 127 時游標會自己跳,死區從 55/200 改成 15/240
-  // (搖桿要推到接近底才動游標,避免靜止時誤觸)
+  // 2026-06-07 修:推下選下、推上選上(用 REV_PITCH 跟飛行 mode 同方向)
+  // 死區 55/200 改成 15/240(搖桿中位偏離時不誤觸)
   static unsigned long lastMove = 0;
   if (millis() - lastMove < 250) return;
-  int p = centerMap(analogRead(J_PITCH), false);
+  int p = centerMap(analogRead(J_PITCH), REV_PITCH);   // 跟 data.pitch 用同方向
   if (p > 240) { menuCursor = (menuCursor + 1) % N_PARAM;            lastMove = millis(); }
   if (p < 15)  { menuCursor = (menuCursor - 1 + N_PARAM) % N_PARAM;  lastMove = millis(); }
 }
 
 void handleMenuButton(int btn) {
-  if (btn == BTN_BACK) { ui = UI_FLIGHT; tft.fillScreen(TFT_BLACK); return; }
+  if (btn == BTN_BACK) { ui = UI_FLIGHT; drawFlightStatic(); return; }
   if (btn == BTN_PLUS)  params[menuCursor].val += params[menuCursor].step;
   if (btn == BTN_MINUS) params[menuCursor].val -= params[menuCursor].step;
   if (params[menuCursor].val < 0) params[menuCursor].val = 0;
@@ -276,67 +280,95 @@ void drawFlightStatic() {
   tft.fillScreen(TFT_BLACK);
   tft.fillRect(0,   0, 240, 32, TFT_NAVY);     // 頂部標題列
   tft.fillRect(0, 280, 240, 40, TFT_DARKGREY); // 底部狀態列
+
+  // 三個姿態 label 預先畫上(不會變,不用每次重畫)
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(10, 50);  tft.print("翻滾");
+  tft.setCursor(10, 130); tft.print("俯仰");
+  tft.setCursor(10, 210); tft.print("偏航");
+
+  g_flightDirty = true;   // 強制下一次 drawFlightDynamic 重畫所有 cached 部分
 }
 
 void drawFlightDynamic(byte mode) {
   char buf[40];
   bool armed = tele.status & STATUS_ARMED;
 
-  // 頂部:模式 + 武裝狀態
-  tft.setFont(&fonts::efontTW_24);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setCursor(5, 4);
-  snprintf(buf, sizeof(buf), "M%02d %s", mode, getModeName(mode));
-  tft.print(buf);
+  // === 頂部 mode 文字:只在 mode 改變時重畫 ===
+  static byte lastModeDrawn = 255;
+  if (mode != lastModeDrawn || g_flightDirty) {
+    tft.fillRect(0, 0, 175, 32, TFT_NAVY);   // 先清舊文字(留 165 給已武/安全)
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setCursor(5, 4);
+    snprintf(buf, sizeof(buf), "M%02d %s", mode, getModeName(mode));
+    tft.print(buf);
+    lastModeDrawn = mode;
+  }
 
-  tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
-  tft.setCursor(180, 4);
-  tft.print(armed ? "已武" : "安全");
+  // === 武裝狀態:只在改變時重畫 ===
+  static bool lastArmed = false;
+  static bool armedInit = false;
+  if (armed != lastArmed || !armedInit || g_flightDirty) {
+    tft.fillRect(175, 0, 65, 32, TFT_NAVY);
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(armed ? TFT_RED : TFT_LIGHTGREY, TFT_NAVY);
+    tft.setCursor(180, 4);
+    tft.print(armed ? "已武" : "安全");
+    lastArmed = armed;
+    armedInit = true;
+  }
 
-  // 主體:已實作/未實作 切換時清一次
+  // === 主體:已實作/未實作 切換時清主體 + 重畫 label ===
   static byte lastBlock = 255;
   byte block = modeImplemented(mode) ? 1 : 0;
-  if (block != lastBlock) {
+  if (block != lastBlock || g_flightDirty) {
     tft.fillRect(0, 34, 240, 244, TFT_BLACK);
+    if (modeImplemented(mode)) {
+      // 把 label 補回去(static 第一次有畫,主體被清掉後再補)
+      tft.setFont(&fonts::efontTW_24);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.setCursor(10, 50);  tft.print("翻滾");
+      tft.setCursor(10, 130); tft.print("俯仰");
+      tft.setCursor(10, 210); tft.print("偏航");
+    } else {
+      tft.setFont(&fonts::efontTW_24);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      tft.setCursor(40, 140); tft.print("此模式");
+      tft.setCursor(40, 175); tft.print("未實作");
+    }
     lastBlock = block;
   }
 
-  if (!modeImplemented(mode)) {
-    tft.setFont(&fonts::efontTW_24);
-    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.setCursor(40, 140);
-    tft.print("此模式");
-    tft.setCursor(40, 175);
-    tft.print("未實作");
-  } else {
-    // 直立排版,三個姿態各佔一段
+  // === 姿態數值:只在改變時重畫 ===
+  if (modeImplemented(mode)) {
+    static int16_t lastRoll = -32000, lastPitch = -32000, lastYaw = -32000;
     tft.setFont(&fonts::efontTW_24);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    // 翻滾
-    tft.setCursor(10, 50);
-    tft.print("翻滾");
-    tft.setCursor(10, 80);
-    snprintf(buf, sizeof(buf), "%+7.1f", tele.roll / 10.0);
-    tft.print(buf);
-    tft.setCursor(180, 80);
-    tft.print("°");
-    // 俯仰
-    tft.setCursor(10, 130);
-    tft.print("俯仰");
-    tft.setCursor(10, 160);
-    snprintf(buf, sizeof(buf), "%+7.1f", tele.pitch / 10.0);
-    tft.print(buf);
-    tft.setCursor(180, 160);
-    tft.print("°");
-    // 偏航速率
-    tft.setCursor(10, 210);
-    tft.print("偏航");
-    tft.setCursor(10, 240);
-    snprintf(buf, sizeof(buf), "%+7.1f", tele.yawRate / 10.0);
-    tft.print(buf);
-    tft.setCursor(170, 240);
-    tft.print("°/秒");
+    if (tele.roll != lastRoll || g_flightDirty) {
+      tft.fillRect(10, 80, 200, 30, TFT_BLACK);
+      tft.setCursor(10, 80);
+      snprintf(buf, sizeof(buf), "%+7.1f °", tele.roll / 10.0);
+      tft.print(buf);
+      lastRoll = tele.roll;
+    }
+    if (tele.pitch != lastPitch || g_flightDirty) {
+      tft.fillRect(10, 160, 200, 30, TFT_BLACK);
+      tft.setCursor(10, 160);
+      snprintf(buf, sizeof(buf), "%+7.1f °", tele.pitch / 10.0);
+      tft.print(buf);
+      lastPitch = tele.pitch;
+    }
+    if (tele.yawRate != lastYaw || g_flightDirty) {
+      tft.fillRect(10, 240, 230, 30, TFT_BLACK);
+      tft.setCursor(10, 240);
+      snprintf(buf, sizeof(buf), "%+7.1f °/秒", tele.yawRate / 10.0);
+      tft.print(buf);
+      lastYaw = tele.yawRate;
+    }
   }
+  g_flightDirty = false;   // 消耗 dirty 旗標
 
   // 底部狀態列(兩行)
   tft.setFont(&fonts::efontTW_14);
