@@ -123,8 +123,9 @@ const bool REV_ROLL     = true;
 // yaw 方向若相反，把 SHOULDER_L / SHOULDER_R 兩腳對調即可
 
 // ---- NRF24 ----
-const uint64_t PIPE_OUT    = 0xABCDABCD71LL;
-const uint8_t  NRF_CHANNEL = 100;
+// 2026-06-07 換新 pipe + channel(跟 Drone_FC_Full PIPE_IN 必須一致)
+const uint64_t PIPE_OUT    = 0x4E6F9C2D5BLL;
+const uint8_t  NRF_CHANNEL = 88;
 
 RF24 radio(PIN_NRF_CE, PIN_NRF_CSN);
 

@@ -95,8 +95,10 @@
 #endif
 
 // ---- NRF24 設定 ----
-const uint64_t PIPE_IN     = 0xABCDABCD71LL;
-const uint8_t  NRF_CHANNEL = 100;
+// 2026-06-07 換新 pipe + channel(避開常見預設 0xABCDABCD71 跟 0xE7E7E7E7E7,
+// 也避開 NRF 函式庫常見 channel 76 / 100,降低跟附近其他飛機撞頻機率)
+const uint64_t PIPE_IN     = 0x4E6F9C2D5BLL;
+const uint8_t  NRF_CHANNEL = 88;
 
 // ---- 電池分壓 ----
 const float BAT_DIVIDER = 4.0f;   // (30k+10k)/10k
@@ -761,6 +763,23 @@ void readAttitude() {
     }
   }
 #endif
+
+  // GPS course over ground 校正(飛行中):NEO-6M 移動時直接告訴你「正在朝哪個方向跑」
+  // 沒磁力計也能 RTH!地面 hover 時 GPS 速度 < 1km/h 不採用(讀值不準)。
+  // 飛行中 GPS course 比磁力計可靠(沒鐵磁干擾、不用校準),權重給高一點(5%)。
+  static unsigned long lastGpsCourseRead = 0;
+  if (millis() - lastGpsCourseRead > 200) {   // GPS 5 Hz 更新,200ms 一次夠
+    lastGpsCourseRead = millis();
+    if (gps.course.isValid() && gps.speed.kmph() > 1.0) {
+      float gpsCourse = gps.course.deg();   // 0~360°,移動方向(0=北 90=東)
+      float diff = gpsCourse - bodyYawEst;
+      if (diff > 180.0f)  diff -= 360.0f;
+      if (diff < -180.0f) diff += 360.0f;
+      bodyYawEst += diff * 0.05f;
+      if (bodyYawEst >= 360.0f) bodyYawEst -= 360.0f;
+      if (bodyYawEst < 0.0f)    bodyYawEst += 360.0f;
+    }
+  }
 }
 
 void recvData() {
