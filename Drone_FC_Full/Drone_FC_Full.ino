@@ -1116,8 +1116,8 @@ void setup() {
   Serial.println("\n=== Drone_FC_Full (最終版) ===");
 
   Wire.begin(PIN_SDA, PIN_SCL);
-  Wire.setClock(400000);
-  Serial.println("[1] I2C ready");
+  Wire.setClock(100000);   // 2026-06-07 從 400k 降到 100k:I²C 主幹有 30cm 杜邦,長線材保險
+  Serial.println("[1] I2C ready (100 kHz)");
 
   Serial2.begin(9600, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
   Serial.println("[1b] GPS UART2 @ 9600 啟動 (NEO-6M 冷啟動 30~120 秒)");
