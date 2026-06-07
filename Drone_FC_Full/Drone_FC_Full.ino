@@ -827,6 +827,12 @@ void recvData() {
 
 void failsafe() {
   if (millis() - lastRxTime > 1000) {
+    if (armed) {
+      // 失聯也算 disarm,levelOffset 寫 NVS 保留 hover 學到的
+      saveCalibration();
+      Serial.printf(">> 失聯 disarm,levelOffset 已存 NVS(R=%+.2f P=%+.2f)\n",
+                    levelOffsetRoll, levelOffsetPitch);
+    }
     resetData();
     armed = false;
     i_roll = i_pitch = i_yaw = 0;
@@ -839,7 +845,13 @@ void failsafe() {
 inline bool modeFlyable(byte m) { return m == 1; }
 
 void disarm() {
-  if (armed) { armed = false; i_roll = i_pitch = i_yaw = 0; }
+  if (armed) {
+    // 降落 / 失聯 disarm:把 hover 飛行中學到的 levelOffset 寫 NVS,下次開機免重新校準
+    saveCalibration();
+    Serial.printf(">> disarm,levelOffset 已存 NVS(R=%+.2f P=%+.2f)\n",
+                  levelOffsetRoll, levelOffsetPitch);
+    armed = false; i_roll = i_pitch = i_yaw = 0;
+  }
 }
 
 void checkArm() {
