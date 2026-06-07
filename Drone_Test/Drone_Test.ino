@@ -58,8 +58,9 @@
 #define ADDR_TCA9548A 0x70
 #endif
 #if ENABLE_HMC5883
-#define ADDR_HMC5883 0x1E
-#define ADDR_QMC5883 0x0D
+#define ADDR_HMC5883  0x1E
+#define ADDR_QMC5883  0x0D
+#define ADDR_QMC5883P 0x2C
 #endif
 
 const float BAT_DIVIDER = 4.0f;
@@ -83,9 +84,10 @@ const char* TOF_NAMES[4] = { "前中", "前左", "前右", "底部" };
 #endif
 
 #if ENABLE_HMC5883
-bool    magOK     = false;
-uint8_t magAddr   = 0;
-bool    magIsQMC  = false;
+enum MagChip { MAG_NONE, MAG_HMC5883L, MAG_QMC5883, MAG_QMC5883P };
+bool    magOK   = false;
+uint8_t magAddr = 0;
+MagChip magChip = MAG_NONE;
 float   magHeadingDeg = 0;
 #endif
 
@@ -104,7 +106,7 @@ void tcaSelect(uint8_t ch) {
 bool magDetect() {
   Wire.beginTransmission(ADDR_HMC5883);
   if (Wire.endTransmission() == 0) {
-    magAddr = ADDR_HMC5883; magIsQMC = false;
+    magAddr = ADDR_HMC5883; magChip = MAG_HMC5883L;
     Wire.beginTransmission(magAddr);
     Wire.write(0x00); Wire.write(0x70); Wire.write(0x20); Wire.write(0x00);
     Wire.endTransmission();
@@ -112,9 +114,17 @@ bool magDetect() {
   }
   Wire.beginTransmission(ADDR_QMC5883);
   if (Wire.endTransmission() == 0) {
-    magAddr = ADDR_QMC5883; magIsQMC = true;
+    magAddr = ADDR_QMC5883; magChip = MAG_QMC5883;
     Wire.beginTransmission(magAddr); Wire.write(0x0B); Wire.write(0x01); Wire.endTransmission();
     Wire.beginTransmission(magAddr); Wire.write(0x09); Wire.write(0x1D); Wire.endTransmission();
+    return true;
+  }
+  Wire.beginTransmission(ADDR_QMC5883P);
+  if (Wire.endTransmission() == 0) {
+    magAddr = ADDR_QMC5883P; magChip = MAG_QMC5883P;
+    Wire.beginTransmission(magAddr); Wire.write(0x0D); Wire.write(0x40); Wire.endTransmission();
+    Wire.beginTransmission(magAddr); Wire.write(0x0A); Wire.write(0xC3); Wire.endTransmission();
+    Wire.beginTransmission(magAddr); Wire.write(0x0B); Wire.write(0x00); Wire.endTransmission();
     return true;
   }
   return false;
@@ -122,23 +132,26 @@ bool magDetect() {
 
 bool magRead() {
   if (!magOK) return false;
-  int16_t mx, my, mz;
-  if (magIsQMC) {
-    Wire.beginTransmission(magAddr); Wire.write(0x00);
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom(magAddr, (uint8_t)6);
-    if (Wire.available() < 6) return false;
-    mx = Wire.read() | (Wire.read() << 8);
-    my = Wire.read() | (Wire.read() << 8);
-    mz = Wire.read() | (Wire.read() << 8);
-  } else {
-    Wire.beginTransmission(magAddr); Wire.write(0x03);
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom(magAddr, (uint8_t)6);
-    if (Wire.available() < 6) return false;
+  int16_t mx = 0, my = 0, mz = 0;
+  uint8_t startReg;
+  switch (magChip) {
+    case MAG_HMC5883L:  startReg = 0x03; break;
+    case MAG_QMC5883:   startReg = 0x00; break;
+    case MAG_QMC5883P:  startReg = 0x01; break;
+    default: return false;
+  }
+  Wire.beginTransmission(magAddr); Wire.write(startReg);
+  if (Wire.endTransmission(false) != 0) return false;
+  Wire.requestFrom(magAddr, (uint8_t)6);
+  if (Wire.available() < 6) return false;
+  if (magChip == MAG_HMC5883L) {
     mx = (Wire.read() << 8) | Wire.read();
     mz = (Wire.read() << 8) | Wire.read();
     my = (Wire.read() << 8) | Wire.read();
+  } else {
+    mx = Wire.read() | (Wire.read() << 8);
+    my = Wire.read() | (Wire.read() << 8);
+    mz = Wire.read() | (Wire.read() << 8);
   }
   float heading = atan2f(-(float)my, (float)mx) * 180.0f / M_PI;
   if (heading < 0) heading += 360.0f;
@@ -253,6 +266,7 @@ void scanI2C() {
       else if (addr == 0x77) name = "BMP280(SDO=VCC)";
       else if (addr == 0x1E) name = "HMC5883L 磁力計";
       else if (addr == 0x0D) name = "QMC5883 磁力計";
+      else if (addr == 0x2C) name = "QMC5883P 磁力計(GY-271 新版)";
       else if (addr == 0x70) name = "TCA9548A 多工器";
       else if (addr == 0x29) name = "VL53L0X(可能在 TCA 通道後)";
       Serial.printf("  0x%02X  ← %s\n", addr, name);
@@ -377,7 +391,14 @@ void setup() {
 #if ENABLE_HMC5883
   if (magDetect()) {
     magOK = true;
-    Serial.printf("[+] 磁力計 OK,位址 0x%02X (%s)\n", magAddr, magIsQMC ? "QMC5883" : "HMC5883L");
+    const char* chipName = "?";
+    switch (magChip) {
+      case MAG_HMC5883L:  chipName = "HMC5883L"; break;
+      case MAG_QMC5883:   chipName = "QMC5883"; break;
+      case MAG_QMC5883P:  chipName = "QMC5883P"; break;
+      default: break;
+    }
+    Serial.printf("[+] 磁力計 OK,位址 0x%02X (%s)\n", magAddr, chipName);
   } else {
     Serial.println("[!] 磁力計沒偵測到(檢查 VCC/GND/SDA/SCL)");
   }
