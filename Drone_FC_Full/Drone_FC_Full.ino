@@ -1033,7 +1033,8 @@ void parseSerial() {
 }
 
 void debugPrint() {
-  if (millis() - lastDbgTime < 200) return;
+  // 2026-06-07 debug 階段 200ms → 1000ms,Serial 不要跑太快,看得到 reset 前訊息
+  if (millis() - lastDbgTime < 1000) return;
   lastDbgTime = millis();
 
   Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%02d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s",
