@@ -330,7 +330,13 @@ void drawRecStatic() {
 }
 
 void drawRecDynamic() {
+  // 2026-06-07 加 cache:同 drawPlayDynamic,避免每 250ms 搶 SPI 干擾錄音 SD 寫入
   uint32_t s = (millis() - recStartMs) / 1000;
+
+  static uint32_t lastRecSec = 99999;
+  if (s == lastRecSec) return;
+  lastRecSec = s;
+
   char buf[16];
   snprintf(buf, sizeof(buf), "%02lu : %02lu", s / 60, s % 60);
 
@@ -365,8 +371,15 @@ void drawPlayStatic() {
 }
 
 void drawPlayDynamic() {
+  // 2026-06-07 加 cache:只在秒數變化時才重畫,避免每 250ms 搶 SPI 干擾 SD 讀資料
+  // 之前每次都全部重畫 → TFT/SD 搶 SPI → 播放雜訊 + 螢幕閃
   uint32_t playSecs  = playBytes / (SAMPLE_RATE * 2);
   uint32_t totalSecs = playTotal / (SAMPLE_RATE * 2);
+
+  static uint32_t lastPlaySec = 99999;
+  if (playSecs == lastPlaySec) return;
+  lastPlaySec = playSecs;
+
   char buf[24];
   snprintf(buf, sizeof(buf), "%02lu:%02lu / %02lu:%02lu",
            playSecs / 60, playSecs % 60,
