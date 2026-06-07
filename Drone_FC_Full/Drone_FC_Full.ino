@@ -41,9 +41,9 @@
 // ============================================================
 
 // ====== 階段開關(感測器接好就改 1) ======
-#define ENABLE_BMP280    0
-#define ENABLE_VL53L0X   0
-#define ENABLE_HMC5883   0   // GY-271 磁力計(2026-06-06 加,Mode 02 用)
+#define ENABLE_BMP280    1
+#define ENABLE_VL53L0X   1
+#define ENABLE_HMC5883   1   // GY-271 磁力計(2026-06-06 加,Mode 02 用)
 
 #include <Wire.h>
 #include <SPI.h>
@@ -1046,7 +1046,8 @@ void debugPrint() {
 #endif
 
 #if ENABLE_VL53L0X
-  Serial.printf(" | F%4dmm B%4dmm", distFront_mm, distBack_mm);
+  Serial.printf(" | ToF C%4d L%4d R%4d D%4d mm",
+                tofDist[0], tofDist[1], tofDist[2], tofDist[3]);
 #endif
 
   // Mode 02 GPS 導航狀態(有目標才印)
