@@ -91,6 +91,7 @@ LGFX tft;
 #define PIN_SPI_MISO    40
 #define PIN_MENU_BTN     7
 #define PIN_SHOULDER_L   8
+#define PIN_AMP_SD       17     // MAX98357A SD(shutdown 控制),LOW=休眠靜音、HIGH=啟用播放
 
 // === 錄音參數 ===
 // 16 kHz 會讓 BCLK = 1.024 MHz,低於 INMP441 規格最小 1.45 MHz 出怪雜訊
@@ -451,6 +452,7 @@ void startPlay() {
   playBytes = 0;
   playTotal = fsize - 44;
   state     = ST_PLAY;
+  digitalWrite(PIN_AMP_SD, HIGH);   // 解除 MAX98357A 休眠,準備播放
   Serial.printf("[+] 播放:%s (%lu bytes 音訊)\n", path.c_str(), playTotal);
 }
 
@@ -478,6 +480,7 @@ void doPlayChunk() {
 
 void stopPlay() {
   playFile.close();
+  digitalWrite(PIN_AMP_SD, LOW);    // 進 MAX98357A 休眠,不再「沙沙」
   Serial.println("[+] 播放結束");
   state = ST_MENU;
 }
@@ -492,6 +495,10 @@ void setup() {
   neopixelWrite(48, 0, 0, 0);
 
   pinMode(PIN_SHOULDER_L, INPUT_PULLUP);
+
+  // MAX98357A SD 預設拉低(休眠),沒在播放時不會「沙沙」
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, LOW);
   analogReadResolution(12);
 
   // === 重要:SPI + SD 先 init,再讓 LovyanGFX 加入共用 ===

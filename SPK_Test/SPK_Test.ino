@@ -32,6 +32,7 @@
 #define PIN_BCLK    11
 #define PIN_WS      12
 #define PIN_DOUT    13
+#define PIN_AMP_SD  17   // MAX98357A SD,HIGH=啟用、LOW=休眠靜音
 
 #define SAMPLE_RATE 16000
 #define TONE_FREQ   440.0f      // A4「La」音
@@ -79,6 +80,10 @@ void setup() {
 
   // 關 RGB LED
   neopixelWrite(48, 0, 0, 0);
+
+  // MAX98357A SD 控制:HIGH 啟用(SPK_Test 整個跑都要播)
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, HIGH);
 
   initI2S();
   Serial.println("[+] I²S 初始化完成");

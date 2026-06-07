@@ -113,6 +113,8 @@ LGFX tft;
 #define PIN_I2S_WS     12
 #define PIN_I2S_DOUT   13           // → MAX98357A DIN
 #define PIN_I2S_DIN    14           // INMP441 SD →
+#define PIN_AMP_SD     17           // MAX98357A SD(shutdown):LOW=休眠靜音、HIGH=啟用
+                                    // 預設拉低消除「沙沙」雜訊,Mode 10 / 音樂 要播放時設 HIGH
 
 // ---- 方向反轉（測試後不對就改）----
 const bool REV_THROTTLE = true;
@@ -446,6 +448,10 @@ void setup() {
   pinMode(SHOULDER_L, INPUT_PULLUP);
   pinMode(SHOULDER_R, INPUT_PULLUP);
   analogReadResolution(12);
+
+  // MAX98357A SD 拉低 → 休眠,沒「沙沙」雜訊。Mode 10 / 音樂播放時程式再設 HIGH
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, LOW);
 
   // TFT 背光:MSP2806 的 LED 腳直接接 B 板 3V3 軌常亮,不需要程式控制
   // (試燒驗證:LED 接 GPIO 15 PWM 不會亮,直接拉 3V3 才亮)
