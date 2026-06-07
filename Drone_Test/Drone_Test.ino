@@ -89,6 +89,7 @@ bool    magOK   = false;
 uint8_t magAddr = 0;
 MagChip magChip = MAG_NONE;
 float   magHeadingDeg = 0;
+float   magOffsetX = 0, magOffsetY = 0;   // 硬鐵校準 offset(magcal 計算後寫)
 #endif
 
 // === Helper:I²C 多工器通道切換 ===
@@ -153,7 +154,10 @@ bool magRead() {
     my = Wire.read() | (Wire.read() << 8);
     mz = Wire.read() | (Wire.read() << 8);
   }
-  float heading = atan2f(-(float)my, (float)mx) * 180.0f / M_PI;
+  // 套用硬鐵校準 offset(magcal 後才有,沒做時 offset = 0)
+  float fx = (float)mx - magOffsetX;
+  float fy = (float)my - magOffsetY;
+  float heading = atan2f(-fy, fx) * 180.0f / M_PI;
   if (heading < 0) heading += 360.0f;
   magHeadingDeg = heading;
   return true;
@@ -181,6 +185,46 @@ void setMotor(int n, int pwm) {
   }
   Serial.printf("[!] M%d 設 PWM = %d\n", n, pwm);
 }
+
+#if ENABLE_HMC5883
+// 磁力計硬鐵校準:10 秒繞圈,記錄 X/Y min/max 算 offset
+void doMagcal() {
+  if (!magOK) { Serial.println("[!] 沒偵測到磁力計"); return; }
+  Serial.println(">> 磁力計校準 10 秒,把飛機平放繞 360° 轉 2 圈...");
+  float xMin = 32767, xMax = -32768;
+  float yMin = 32767, yMax = -32768;
+  unsigned long endMs = millis() + 10000;
+  int samples = 0;
+  while (millis() < endMs) {
+    int16_t mx = 0, my = 0;
+    uint8_t startReg = (magChip == MAG_HMC5883L) ? 0x03
+                     : (magChip == MAG_QMC5883P) ? 0x01 : 0x00;
+    Wire.beginTransmission(magAddr); Wire.write(startReg);
+    if (Wire.endTransmission(false) == 0) {
+      Wire.requestFrom(magAddr, (uint8_t)6);
+      if (Wire.available() >= 6) {
+        if (magChip == MAG_HMC5883L) {
+          mx = (Wire.read() << 8) | Wire.read();
+          Wire.read(); Wire.read();
+          my = (Wire.read() << 8) | Wire.read();
+        } else {
+          mx = Wire.read() | (Wire.read() << 8);
+          my = Wire.read() | (Wire.read() << 8);
+          Wire.read(); Wire.read();
+        }
+        if (mx < xMin) xMin = mx; if (mx > xMax) xMax = mx;
+        if (my < yMin) yMin = my; if (my > yMax) yMax = my;
+        samples++;
+      }
+    }
+    delay(50);
+  }
+  magOffsetX = (xMin + xMax) / 2.0f;
+  magOffsetY = (yMin + yMax) / 2.0f;
+  Serial.printf(">> 校準完成,%d samples,offset X=%.0f Y=%.0f\n", samples, magOffsetX, magOffsetY);
+  Serial.println(">> 現在 heading 會用這個 offset,以後讀值才準");
+}
+#endif
 
 void printIMU() {
   int16_t ax, ay, az, gx, gy, gz;
@@ -291,6 +335,7 @@ void printHelp() {
   Serial.println("  bmp        氣壓 / 高度");
   Serial.println("  bat        電池電壓");
   Serial.println("  scan       I²C 掃描(找有哪些位址在線上)");
+  Serial.println("  magcal     磁力計校準(10 秒繞 360° 兩圈)");
   Serial.println("  all        一次印全部");
   Serial.println("  m <pwm>    4 顆馬達同時設 PWM(1000~2000)");
   Serial.println("  m1 <pwm>   只 M1(M2/M3/M4 同理)");
@@ -314,6 +359,9 @@ void handleSerial() {
   else if (s == "bat")  printBat();
   else if (s == "all")  printAll();
   else if (s == "scan") scanI2C();
+#if ENABLE_HMC5883
+  else if (s == "magcal") doMagcal();
+#endif
   else if (s == "stop") setMotorAll(1000);
   else if (s.startsWith("m ")) {
     setMotorAll(s.substring(2).toInt());
@@ -424,17 +472,56 @@ void loop() {
   // 餵 GPS NMEA 字串
   while (Serial2.available()) gps.encode(Serial2.read());
 
-  // 每秒自動印一次 IMU + 電池 + GPS 衛星數(讓你看到飛機活著)
+  // 每秒自動印一次「所有感測器整合行」
   static unsigned long lastTick = 0;
   if (millis() - lastTick > 1000) {
     lastTick = millis();
+
+    // IMU
     int16_t ax, ay, az, gx, gy, gz;
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
     float roll  = atan2f(ax, az) * 57.2958f;
     float pitch = atan2f(-ay, sqrtf((float)ax*ax + (float)az*az)) * 57.2958f;
+
+    // BMP280
+    float bmpPres = 0, bmpRel = 0;
+#if ENABLE_BMP280
+    if (bmp280OK) {
+      bmpPres = bmp.readPressure() / 100.0f;
+      bmpRel  = bmp.readAltitude(1013.25f) - baseAltitude;
+    }
+#endif
+
+    // 磁力計
+    float magH = 0;
+#if ENABLE_HMC5883
+    if (magOK) { magRead(); magH = magHeadingDeg; }
+#endif
+
+    // VL53L0X 4 顆(讀 1 次,沒接就印「---」)
+    int tofD[4] = { -2, -2, -2, -2 };   // -2 = 沒接
+#if ENABLE_VL53L0X
+    for (int ch = 0; ch < 4; ch++) {
+      if (!tofOK[ch]) continue;
+      tcaSelect(ch);
+      VL53L0X_RangingMeasurementData_t m;
+      tofs[ch].rangingTest(&m, false);
+      tofD[ch] = (m.RangeStatus != 4) ? m.RangeMilliMeter : -1;
+    }
+#endif
+
+    // 電池
     int batRaw = analogRead(PIN_BAT_ADC);
     float batV = batRaw * (3.3f / 4095.0f) * BAT_DIVIDER;
-    Serial.printf("R%+5.1f° P%+5.1f° | Bat %.2fV | GPS sat%lu\n",
-                  roll, pitch, batV, gps.satellites.value());
+
+    // 整合一行(寬,但看得到所有元件)
+    Serial.printf("R%+5.1f° P%+5.1f° | BMP%.0fhPa %+5.1fm | Mag%5.1f° |"
+                  " ToF C%4d L%4d R%4d D%4d | Bat%.2fV | GPS sat%lu\n",
+                  roll, pitch,
+                  bmpPres, bmpRel,
+                  magH,
+                  tofD[0], tofD[1], tofD[2], tofD[3],
+                  batV,
+                  gps.satellites.value());
   }
 }
