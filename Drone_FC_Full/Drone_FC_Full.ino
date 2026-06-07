@@ -90,7 +90,8 @@
 #endif
 #if ENABLE_HMC5883
 #define ADDR_HMC5883   0x1E   // Honeywell HMC5883L 原版
-#define ADDR_QMC5883   0x0D   // QST QMC5883 中國複製版(常見)
+#define ADDR_QMC5883   0x0D   // QST QMC5883 中國複製版
+#define ADDR_QMC5883P  0x2C   // QST QMC5883P 新版(2024 年後 GY-271 多數是這個)
 #endif
 
 // ---- NRF24 設定 ----
@@ -235,9 +236,13 @@ float bodyYawEst         = 0;       // 機頭朝向 0~360°(沒磁力計時用 g
 
 // ---- GY-271 磁力計狀態(ENABLE_HMC5883=1 才用)----
 #if ENABLE_HMC5883
-bool   magOK         = false;
-uint8_t magAddr      = 0;     // 偵測到的 I²C 位址(0x1E 或 0x0D)
-bool   magIsQMC      = false; // 是否為 QMC 版(暫存器不同)
+// 磁力計三種變體分類
+enum MagChip { MAG_NONE, MAG_HMC5883L, MAG_QMC5883, MAG_QMC5883P };
+bool    magOK     = false;
+uint8_t magAddr   = 0;
+MagChip magChip   = MAG_NONE;
+bool    magIsQMC  = false;    // 為相容舊程式碼保留:QMC5883 或 QMC5883P 都算 QMC
+
 float  magHeadingDeg = 0;     // 從磁力計讀到的絕對方位
 // 硬鐵校準偏移(放磁鐵轉一圈量出來,先給 0 待校準)
 float magOffsetX = 0, magOffsetY = 0, magOffsetZ = 0;
@@ -373,28 +378,37 @@ void tcaSelect(uint8_t ch) {
 // ============================================================
 #if ENABLE_HMC5883
 
-// 偵測模組型號(HMC5883L 或 QMC5883)
+// 偵測模組型號(HMC5883L / QMC5883 / QMC5883P 三種)
 bool magDetect() {
-  // 先試 HMC5883L
+  // 1. 試 HMC5883L(原版 Honeywell)
   Wire.beginTransmission(ADDR_HMC5883);
   if (Wire.endTransmission() == 0) {
-    magAddr   = ADDR_HMC5883;
-    magIsQMC  = false;
-    // HMC5883L 初始化:Config A=0x70(8 avg, 15Hz, normal),B=0x20(±1.3 gauss),Mode=0x00(continuous)
+    magAddr  = ADDR_HMC5883; magChip = MAG_HMC5883L; magIsQMC = false;
+    // Config A=0x70(8 avg, 15Hz)、B=0x20(±1.3G)、Mode=0x00(continuous)
     Wire.beginTransmission(magAddr);
     Wire.write(0x00); Wire.write(0x70); Wire.write(0x20); Wire.write(0x00);
     Wire.endTransmission();
     return true;
   }
-  // 再試 QMC5883(常見的中國複製版)
+  // 2. 試 QMC5883(舊版中國複製,位址 0x0D)
   Wire.beginTransmission(ADDR_QMC5883);
   if (Wire.endTransmission() == 0) {
-    magAddr   = ADDR_QMC5883;
-    magIsQMC  = true;
-    // QMC5883:0x09 control reg = 0x1D(continuous, 200Hz, 2G, OSR=512)
-    // 0x0B set/reset period = 0x01
+    magAddr  = ADDR_QMC5883; magChip = MAG_QMC5883; magIsQMC = true;
     Wire.beginTransmission(magAddr); Wire.write(0x0B); Wire.write(0x01); Wire.endTransmission();
     Wire.beginTransmission(magAddr); Wire.write(0x09); Wire.write(0x1D); Wire.endTransmission();
+    return true;
+  }
+  // 3. 試 QMC5883P(新版 2024+,位址 0x2C,暫存器不同)
+  Wire.beginTransmission(ADDR_QMC5883P);
+  if (Wire.endTransmission() == 0) {
+    magAddr  = ADDR_QMC5883P; magChip = MAG_QMC5883P; magIsQMC = true;
+    // QMC5883P 控制:
+    //   0x0A control reg 1 = 0xC3(continuous mode, ODR 200Hz, OSR 8, 30Gauss range)
+    //   0x0B control reg 2 = 0x00(no soft reset)
+    //   0x0D = 0x40(SET/RESET 自動,for self-calibration)
+    Wire.beginTransmission(magAddr); Wire.write(0x0D); Wire.write(0x40); Wire.endTransmission();
+    Wire.beginTransmission(magAddr); Wire.write(0x0A); Wire.write(0xC3); Wire.endTransmission();
+    Wire.beginTransmission(magAddr); Wire.write(0x0B); Wire.write(0x00); Wire.endTransmission();
     return true;
   }
   return false;
@@ -405,24 +419,29 @@ bool magRead() {
   if (!magOK) return false;
 
   int16_t mx, my, mz;
-  if (magIsQMC) {
-    Wire.beginTransmission(magAddr);
-    Wire.write(0x00);    // QMC 從 0x00 開始讀 X-low, X-high, Y-low, Y-high, Z-low, Z-high
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom(magAddr, (uint8_t)6);
-    if (Wire.available() < 6) return false;
+  uint8_t startReg;
+  switch (magChip) {
+    case MAG_HMC5883L:  startReg = 0x03; break;   // HMC 從 0x03 X→Z→Y(big endian)
+    case MAG_QMC5883:   startReg = 0x00; break;   // QMC 從 0x00 X→Y→Z(little endian)
+    case MAG_QMC5883P:  startReg = 0x01; break;   // QMC5883P 從 0x01 X→Y→Z(little endian)
+    default:            return false;
+  }
+
+  Wire.beginTransmission(magAddr);
+  Wire.write(startReg);
+  if (Wire.endTransmission(false) != 0) return false;
+  Wire.requestFrom(magAddr, (uint8_t)6);
+  if (Wire.available() < 6) return false;
+
+  if (magChip == MAG_HMC5883L) {
+    mx = (Wire.read() << 8) | Wire.read();
+    mz = (Wire.read() << 8) | Wire.read();   // HMC 順序 X→Z→Y
+    my = (Wire.read() << 8) | Wire.read();
+  } else {
+    // QMC5883 跟 QMC5883P 都是 little endian X→Y→Z
     mx = Wire.read() | (Wire.read() << 8);
     my = Wire.read() | (Wire.read() << 8);
     mz = Wire.read() | (Wire.read() << 8);
-  } else {
-    Wire.beginTransmission(magAddr);
-    Wire.write(0x03);    // HMC 從 0x03 開始讀 X-high, X-low, Z-high, Z-low, Y-high, Y-low
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom(magAddr, (uint8_t)6);
-    if (Wire.available() < 6) return false;
-    mx = (Wire.read() << 8) | Wire.read();
-    mz = (Wire.read() << 8) | Wire.read();   // HMC 順序是 X→Z→Y
-    my = (Wire.read() << 8) | Wire.read();
   }
 
   // 套用硬鐵校準
@@ -996,23 +1015,31 @@ void parseSerial() {
       unsigned long endMs = millis() + 10000;
       int samples = 0;
       while (millis() < endMs) {
-        int16_t mx, my, mz;
-        Wire.beginTransmission(magAddr);
-        Wire.write(magIsQMC ? 0x00 : 0x03);
-        if (Wire.endTransmission(false) == 0) {
-          Wire.requestFrom(magAddr, (uint8_t)6);
-          if (Wire.available() >= 6) {
-            if (magIsQMC) {
-              mx = Wire.read() | (Wire.read() << 8);
-              my = Wire.read() | (Wire.read() << 8);
-            } else {
-              mx = (Wire.read() << 8) | Wire.read();
-              Wire.read(); Wire.read();          // 跳過 Z
-              my = (Wire.read() << 8) | Wire.read();
+        // 用 magRead() 直接讀(內部處理三種晶片差異)
+        if (magRead()) {
+          // magRead 不直接回 raw,改成自己讀:
+          // 但簡單做法用 magHeadingDeg 反推不準,直接借 magRead 的 mx/my 計算
+          // 改成:重新走一次 register 讀
+          int16_t mx = 0, my = 0;
+          uint8_t startReg = (magChip == MAG_HMC5883L) ? 0x03
+                           : (magChip == MAG_QMC5883P) ? 0x01 : 0x00;
+          Wire.beginTransmission(magAddr); Wire.write(startReg);
+          if (Wire.endTransmission(false) == 0) {
+            Wire.requestFrom(magAddr, (uint8_t)6);
+            if (Wire.available() >= 6) {
+              if (magChip == MAG_HMC5883L) {
+                mx = (Wire.read() << 8) | Wire.read();
+                Wire.read(); Wire.read();   // skip Z
+                my = (Wire.read() << 8) | Wire.read();
+              } else {
+                mx = Wire.read() | (Wire.read() << 8);
+                my = Wire.read() | (Wire.read() << 8);
+                Wire.read(); Wire.read();   // skip Z
+              }
+              if (mx < xMin) xMin = mx; if (mx > xMax) xMax = mx;
+              if (my < yMin) yMin = my; if (my > yMax) yMax = my;
+              samples++;
             }
-            if (mx < xMin) xMin = mx; if (mx > xMax) xMax = mx;
-            if (my < yMin) yMin = my; if (my > yMax) yMax = my;
-            samples++;
           }
         }
         delay(50);
@@ -1140,8 +1167,15 @@ void setup() {
 #if ENABLE_HMC5883
   if (magDetect()) {
     magOK = true;
+    const char* chipName = "?";
+    switch (magChip) {
+      case MAG_HMC5883L:  chipName = "HMC5883L"; break;
+      case MAG_QMC5883:   chipName = "QMC5883"; break;
+      case MAG_QMC5883P:  chipName = "QMC5883P"; break;
+      default: break;
+    }
     Serial.printf("[*] 磁力計 OK,位址 0x%02X(%s),記得執行 magcal 校準\n",
-                  magAddr, magIsQMC ? "QMC5883" : "HMC5883L");
+                  magAddr, chipName);
   } else {
     Serial.println("[!] 磁力計沒偵測到,Mode 02 仍可飛但 yaw 會漂");
   }
