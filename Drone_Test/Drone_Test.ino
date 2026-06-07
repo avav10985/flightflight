@@ -11,7 +11,7 @@
 //   help              ← 印指令清單
 //   imu               ← 印 MPU6050 姿態 + gyro
 //   gps               ← 印 GPS 狀態
-//   tof               ← 印 4 顆雷射距離
+//   tof               ← 印 4 顆雷射測距距離(CH0 前中、CH1 前左、CH2 前右、CH3 底部)
 //   mag               ← 印磁力計 heading
 //   bmp               ← 印氣壓 / 高度
 //   bat               ← 印電池電壓
@@ -247,15 +247,16 @@ void printGPS() {
 void printToF() {
 #if ENABLE_VL53L0X
   for (int ch = 0; ch < 4; ch++) {
-    if (!tofOK[ch]) { Serial.printf("[ToF] %s: 沒接\n", TOF_NAMES[ch]); continue; }
+    if (!tofOK[ch]) { Serial.printf("[雷射] %s: 沒接\n", TOF_NAMES[ch]); continue; }
     tcaSelect(ch);
     VL53L0X_RangingMeasurementData_t m;
     tofs[ch].rangingTest(&m, false);
     int d = (m.RangeStatus != 4) ? m.RangeMilliMeter : -1;
-    Serial.printf("[ToF] %s: %dmm\n", TOF_NAMES[ch], d);
+    Serial.printf("[雷射] %s: %d mm(%s)\n", TOF_NAMES[ch], d,
+                  d == -1 ? "超出範圍" : d > 0 ? "正常" : "未讀到");
   }
 #else
-  Serial.println("[ToF] ENABLE_VL53L0X = 0");
+  Serial.println("[雷射] ENABLE_VL53L0X = 0");
 #endif
 }
 
@@ -330,7 +331,7 @@ void printHelp() {
   Serial.println("  help       此說明");
   Serial.println("  imu        姿態 + gyro");
   Serial.println("  gps        GPS");
-  Serial.println("  tof        4 顆雷射");
+  Serial.println("  tof        4 顆雷射測距");
   Serial.println("  mag        磁力計");
   Serial.println("  bmp        氣壓 / 高度");
   Serial.println("  bat        電池電壓");
@@ -421,16 +422,16 @@ void setup() {
   }
 #endif
 
-  // VL53L0X × 4
+  // 4 顆雷射測距 VL53L0X(透過 TCA9548A 多工器)
 #if ENABLE_VL53L0X
   for (int ch = 0; ch < 4; ch++) {
     tcaSelect(ch);
     delay(50);
     if (tofs[ch].begin(0x29)) {
       tofOK[ch] = true;
-      Serial.printf("[+] VL53L0X #%d (%s): OK\n", ch, TOF_NAMES[ch]);
+      Serial.printf("[+] 雷射 CH%d (%s): OK\n", ch, TOF_NAMES[ch]);
     } else {
-      Serial.printf("[!] VL53L0X #%d (%s): FAIL\n", ch, TOF_NAMES[ch]);
+      Serial.printf("[!] 雷射 CH%d (%s): 沒接或壞了\n", ch, TOF_NAMES[ch]);
     }
   }
 #endif
@@ -515,8 +516,8 @@ void loop() {
     float batV = batRaw * (3.3f / 4095.0f) * BAT_DIVIDER;
 
     // 整合一行(寬,但看得到所有元件)
-    Serial.printf("R%+5.1f° P%+5.1f° | BMP%.0fhPa %+5.1fm | Mag%5.1f° |"
-                  " ToF C%4d L%4d R%4d D%4d | Bat%.2fV | GPS sat%lu\n",
+    Serial.printf("翻滾%+5.1f° 俯仰%+5.1f° | 氣壓%.0fhPa 高度%+5.1fm | 方位%5.1f° |"
+                  " 雷射 中%4d 左%4d 右%4d 底%4d | 電池%.2fV | GPS衛星%lu\n",
                   roll, pitch,
                   bmpPres, bmpRel,
                   magH,
