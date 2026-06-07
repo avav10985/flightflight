@@ -780,6 +780,38 @@ void readAttitude() {
       if (bodyYawEst < 0.0f)    bodyYawEst += 360.0f;
     }
   }
+
+  // ============================================================
+  // 飛行中 hover 自動校準 levelOffset
+  // 偵測「穩定 hover」狀態,慢慢調 levelOffset 讓 hover 姿態趨近 0°
+  // 這比地面 calfull 準很多 — 直接學「飛機真實飛行時的水平」
+  // ============================================================
+  static unsigned long stableSinceMs = 0;
+  static bool          stableActive  = false;
+
+  // 1. 偵測穩定條件
+  bool throttleHover = (data.throttle > 130 && data.throttle < 200);   // hover 油門範圍
+  bool yawIdle       = (fabsf(yawRate) < 5.0f);                        // 沒在轉
+  bool noRotate      = (fabsf(gRoll) < 5.0f && fabsf(gPitch) < 5.0f);  // 沒在傾斜變化
+  // 加速度向量大小 ≈ 1G(沒加速):MPU6050 ±2G 模式下 1G ≈ 16384
+  float accMag = sqrtf((float)rawAx*rawAx + (float)rawAy*rawAy + (float)rawAz*rawAz);
+  bool gravityOnly = (accMag > 15000 && accMag < 17500);   // ±7% 容差
+
+  if (armed && throttleHover && yawIdle && noRotate && gravityOnly) {
+    if (!stableActive) {
+      stableActive  = true;
+      stableSinceMs = millis();
+    }
+    if (millis() - stableSinceMs > 3000) {
+      // 持續穩定 > 3 秒:慢慢調 levelOffset(每次循環調 1% 朝當前讀值靠近)
+      // 程式預設 50 Hz 飛控迴圈 → 1% × 50/sec → 大約 100 秒會完全 sync
+      // 太快會跟 PID 自穩衝突,太慢使用者察覺不到效果
+      levelOffsetRoll  += roll  * 0.0002f;
+      levelOffsetPitch += pitch * 0.0002f;
+    }
+  } else {
+    stableActive  = false;
+  }
 }
 
 void recvData() {
