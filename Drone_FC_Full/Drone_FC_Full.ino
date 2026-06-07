@@ -76,9 +76,10 @@
 #define PIN_SDA      21
 #define PIN_SCL      22
 #define PIN_BAT_ADC  34   // 電池分壓中點
-// 2026-06-07 對調 GPIO 16/17:對應使用者實際接線
-#define PIN_GPS_RX   17   // ESP32 接收 ← GPS TX
-#define PIN_GPS_TX   16   // ESP32 傳送 → GPS RX
+// 2026-06-07 GPS 從 UART2 預設腳(16/17)搬到 32/33:對應使用者實際接線
+//   GPIO 16/17 釋出可挪用給其他元件
+#define PIN_GPS_RX   33   // ESP32 接收 ← GPS TX(GPS 講話,ESP32 聽)
+#define PIN_GPS_TX   32   // ESP32 傳送 → GPS RX(ESP32 講話,GPS 聽)
 
 // ---- I²C 地址(感測器才用) ----
 #if ENABLE_BMP280
