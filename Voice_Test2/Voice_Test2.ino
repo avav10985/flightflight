@@ -73,6 +73,7 @@ const int PIN_SPI_MOSI   = 39;
 const int PIN_SPI_MISO   = 40;
 const int PIN_MENU_BTN   = 7;
 const int PIN_SHOULDER_L = 8;
+const int PIN_JOY_PITCH  = 4;    // 右搖桿 Y(選單上下用)
 
 const uint32_t SAMPLE_RATE = 32000;
 const int      BUF_SAMPLES = 512;
@@ -235,7 +236,7 @@ void drawMenuStatic() {
   tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
   tft.setCursor(5, 285);
-  tft.print("肩鍵L:錄音  +/-:選  OK:放");
+  tft.print("肩L:錄  右搖桿:選  OK:放");
   tft.setCursor(5, 302);
   tft.print("返回:重新掃描");
 }
@@ -539,6 +540,29 @@ void loop() {
     static int lastCursor = -1;
     if (cursor != lastCursor) { drawMenuDynamic(); lastCursor = cursor; }
     if (shldLEdge) { startRec(); return; }
+
+    // 右搖桿 Y 軸控制游標(連續推會加速捲動)
+    // 推上(ADC < 1000)→ 游標上;推下(ADC > 3000)→ 游標下
+    static unsigned long lastJoyMove = 0;
+    static unsigned long joyHoldSince = 0;
+    int joyY = analogRead(PIN_JOY_PITCH);
+    bool joyUp   = (joyY < 1000);
+    bool joyDown = (joyY > 3000);
+    if (!joyUp && !joyDown) {
+      joyHoldSince = 0;   // 回中位重置加速計時
+    } else {
+      if (joyHoldSince == 0) joyHoldSince = millis();
+      // 按住越久越快:前 500ms 一次,500ms~1.5s 250ms 一次,1.5s 後 100ms 一次
+      unsigned long held = millis() - joyHoldSince;
+      unsigned long rate = (held > 1500) ? 80 : (held > 500) ? 200 : 350;
+      if (millis() - lastJoyMove >= rate) {
+        if (joyUp   && cursor > 0)               cursor--;
+        if (joyDown && cursor < fileCount - 1)   cursor++;
+        lastJoyMove = millis();
+      }
+    }
+
+    // 階梯按鈕(備用)
     if (btnEdge) {
       if (btn == BTN_PLUS  && cursor > 0)             cursor--;
       if (btn == BTN_MINUS && cursor < fileCount - 1) cursor++;
