@@ -81,12 +81,14 @@ void setup() {
   // 關 RGB LED
   neopixelWrite(48, 0, 0, 0);
 
-  // MAX98357A SD 控制:HIGH 啟用(SPK_Test 整個跑都要播)
+  // MAX98357A SD 預設拉低(boot 安靜),I²S 穩定後才拉高
   pinMode(PIN_AMP_SD, OUTPUT);
-  digitalWrite(PIN_AMP_SD, HIGH);
+  digitalWrite(PIN_AMP_SD, LOW);
 
   initI2S();
   Serial.println("[+] I²S 初始化完成");
+  delay(20);
+  digitalWrite(PIN_AMP_SD, HIGH);     // I²S 穩定後啟用 MAX,沒 boot pop
   Serial.printf("[+] 開始播放 %.0f Hz 正弦波(中央 A 音 / La)\n", TONE_FREQ);
   Serial.println("[+] 應該聽到連續「嗶~~」音");
   Serial.println("");
