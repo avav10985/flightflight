@@ -38,7 +38,7 @@
 #define PIN_AMP_SD     18    // MAX98357A SD(shutdown 控制),HIGH = 啟用、LOW = 休眠靜音
 
 #define SAMPLE_RATE    32000
-#define BUF_SAMPLES    512
+#define BUF_SAMPLES    1024     // 加大:每次 SD 讀 2048 bytes,I²S 寫 4096 bytes,呼叫次數減半
 
 i2s_chan_handle_t tx_handle = NULL;
 File              playFile;
@@ -48,9 +48,10 @@ bool              sdOK = false;
 
 void initI2S() {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  // 大 DMA buffer 避免 SD 讀慢時 TX underrun
-  chan_cfg.dma_desc_num  = 8;
-  chan_cfg.dma_frame_num = 512;
+  // DMA 加大:16 desc × 1024 frame × 4 byte = 64 KB 緩衝 = 500ms 容忍 SD 讀延遲
+  // (32 kHz × 4 byte = 128 KB/s,500ms 緩衝吸收 SD 偶發慢讀,消除咖咖咖 underrun click)
+  chan_cfg.dma_desc_num  = 16;
+  chan_cfg.dma_frame_num = 1024;
   i2s_new_channel(&chan_cfg, &tx_handle, NULL);   // 只要 TX
 
   i2s_std_config_t std_cfg = {};
