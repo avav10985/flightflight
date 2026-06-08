@@ -422,9 +422,7 @@ void startRec() {
     Serial.println("[!] 無法開啟錄音檔");
     return;
   }
-  // 軟體互斥:停 I²S TX DMA(避免閒置 TX DMA 干擾 RX timing)+ 確認 MAX 休眠
-  digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠
-  i2s_channel_disable(i2s_tx);       // 停 TX DMA
+  digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠(不影響錄音)
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -459,7 +457,6 @@ void doRecChunk() {
 void stopRec() {
   writeWavHeader(recFile, recBytes);
   recFile.close();
-  i2s_channel_enable(i2s_tx);        // 恢復 TX DMA(下次播放用得到)
   Serial.printf("[+] 錄音結束,寫入 %lu bytes\n", recBytes);
   scanFiles();
   cursor = fileCount - 1;
@@ -498,11 +495,8 @@ void startPlay() {
   playBytes = 0;
   playTotal = fsize - 44;
   state     = ST_PLAY;
-  // 軟體互斥:停 I²S RX DMA(背景 INM 讀取會干擾 TX timing)+ 開 MAX
-  // 經實證:Play_Test 沒 RX channel 所以乾淨,Voice_Test 雙工模式 RX DMA 背景跑
-  // 才造成播放雜訊。INMP441 不用斷電,停 RX DMA 就夠
-  i2s_channel_disable(i2s_rx);      // 停 RX DMA
-  digitalWrite(PIN_AMP_SD,  HIGH);  // 解除 MAX98357A 休眠
+  // 註:之前試過 i2s_channel_disable(i2s_rx),會把 BCLK 一起停掉 → MAX 無聲。撤回。
+  digitalWrite(PIN_AMP_SD, HIGH);   // 解除 MAX98357A 休眠
   Serial.printf("[+] 播放:%s (%lu bytes 音訊)\n", path.c_str(), playTotal);
 }
 
@@ -530,9 +524,7 @@ void doPlayChunk() {
 
 void stopPlay() {
   playFile.close();
-  // 反過來:關 MAX + 恢復 I²S RX DMA(下次錄音用得到)
   digitalWrite(PIN_AMP_SD, LOW);     // MAX98357A 休眠
-  i2s_channel_enable(i2s_rx);        // 恢復 RX DMA
   Serial.println("[+] 播放結束");
   state = ST_MENU;
 }
