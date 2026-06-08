@@ -92,6 +92,8 @@ LGFX tft;
 #define PIN_MENU_BTN     7
 #define PIN_SHOULDER_L   8
 #define PIN_AMP_SD       18     // MAX98357A SD(shutdown 控制),LOW=休眠靜音、HIGH=啟用播放
+#define PIN_MIC_PWR      17     // INMP441 VDD 控制(GPIO 直接供電 ~1.4mA OK)
+                                // 播放時拉低 → INMP441 斷電 → SD 線停止 → 不干擾 MAX
 
 // === 錄音參數 ===
 // 16 kHz 會讓 BCLK = 1.024 MHz,低於 INMP441 規格最小 1.45 MHz 出怪雜訊
@@ -405,6 +407,10 @@ void startRec() {
     Serial.println("[!] 無法開啟錄音檔");
     return;
   }
+  // 互斥啟用:關 MAX(不影響 INM 讀值)+ 確保 INMP441 通電
+  digitalWrite(PIN_AMP_SD,  LOW);    // MAX 休眠,避免電源耦合到 INM
+  digitalWrite(PIN_MIC_PWR, HIGH);   // INMP441 通電(預設應該已開,保險)
+  delay(50);                         // INMP441 上電 wakeup ~30ms,給 50ms 安全
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -465,7 +471,9 @@ void startPlay() {
   playBytes = 0;
   playTotal = fsize - 44;
   state     = ST_PLAY;
-  digitalWrite(PIN_AMP_SD, HIGH);   // 解除 MAX98357A 休眠,準備播放
+  // 互斥啟用:關 INMP441(切斷 SD 線干擾)+ 開 MAX
+  digitalWrite(PIN_MIC_PWR, LOW);   // 斷 INMP441 電源 → SD 線停止活動 → 不干擾 MAX
+  digitalWrite(PIN_AMP_SD,  HIGH);  // 解除 MAX98357A 休眠
   Serial.printf("[+] 播放:%s (%lu bytes 音訊)\n", path.c_str(), playTotal);
 }
 
@@ -493,7 +501,9 @@ void doPlayChunk() {
 
 void stopPlay() {
   playFile.close();
-  digitalWrite(PIN_AMP_SD, LOW);    // 進 MAX98357A 休眠,不再「沙沙」
+  // 互斥邏輯反過來:關 MAX + 開 INMP441(等待 30ms 喚醒)
+  digitalWrite(PIN_AMP_SD,  LOW);    // 進 MAX98357A 休眠,不再「沙沙」
+  digitalWrite(PIN_MIC_PWR, HIGH);   // 重新供電 INMP441,下次錄音用得到
   Serial.println("[+] 播放結束");
   state = ST_MENU;
 }
@@ -512,6 +522,11 @@ void setup() {
   // MAX98357A SD 預設拉低(休眠),沒在播放時不會「沙沙」
   pinMode(PIN_AMP_SD, OUTPUT);
   digitalWrite(PIN_AMP_SD, LOW);
+
+  // INMP441 預設通電(待機可以馬上開始錄音);播放時程式會拉低關掉
+  pinMode(PIN_MIC_PWR, OUTPUT);
+  digitalWrite(PIN_MIC_PWR, HIGH);
+
   analogReadResolution(12);
 
   // === 重要:SPI + SD 先 init,再讓 LovyanGFX 加入共用 ===
