@@ -425,18 +425,27 @@ void startRec() {
   }
   digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠
   i2sStartRX();                       // 切到 RX-only 模式(MAX 沒被綁進 I²S)
-  delay(30);                          // INMP441 wakeup
+  delay(200);                         // 拉長 wakeup:INMP441 上電 + I²S RX DMA buffer 填滿時間
+  // 把 readBytes timeout 縮短(預設 1 秒會把 loop 卡死)
+  i2s.setTimeout(50);
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
   recStartMs = millis();
   state      = ST_REC;
+  g_recDbgCount = 0;   // 重置 doRecChunk 的 debug count
   Serial.printf("[+] 開始錄音:%s\n", name.c_str());
 }
+
+int g_recDbgCount = 0;   // 每次 startRec 重置,印 doRecChunk 前 5 次的 readBytes 結果
 
 void doRecChunk() {
   int32_t raw[BUF_SAMPLES];
   size_t bytesRead = i2s.readBytes((char*)raw, sizeof(raw));
+  if (g_recDbgCount < 5) {
+    Serial.printf("[rec] readBytes %u / %u\n", (unsigned)bytesRead, (unsigned)sizeof(raw));
+    g_recDbgCount++;
+  }
   if (bytesRead == 0) return;
   int samples = bytesRead / 4;
   int16_t pcm[BUF_SAMPLES];
