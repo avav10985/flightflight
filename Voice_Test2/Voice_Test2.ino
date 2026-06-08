@@ -159,10 +159,14 @@ int readMenuBtn() {
   v /= 4;
 
   int raw;
-  if      (v > 3300) raw = BTN_PLUS;
-  else if (v > 2300) raw = BTN_MINUS;
-  else if (v > 1550) raw = BTN_OK;
-  else if (v >  600) raw = BTN_BACK;
+  // 2026-06-09 OK 跟 BACK threshold 互換時的中間值
+  // 原本 OK > 1550 太近,OK 按鈕 ADC 飄一點(1400 左右)就會被當成 BACK
+  // → 觸發「重新掃描 SD」+ cursor=0 → 自動跳回 REC_001
+  // 把 OK 邊界拉低到 1200,BACK 拉低到 400,給 OK 更多 margin
+  if      (v > 3000) raw = BTN_PLUS;
+  else if (v > 2100) raw = BTN_MINUS;
+  else if (v > 1200) raw = BTN_OK;
+  else if (v >  400) raw = BTN_BACK;
   else               raw = BTN_NONE;
 
   // 候選變了 → 重置計時;沒變 → 累計穩定時間
