@@ -34,7 +34,10 @@
 #define PIN_DOUT    13
 #define PIN_AMP_SD  18   // MAX98357A SD,HIGH=啟用、LOW=休眠靜音
 
-#define SAMPLE_RATE 16000
+// 2026-06-09 SAMPLE_RATE 從 16000 提到 32000:
+//   MAX98357A 規格最低 BCLK = 800 kHz,16kHz × 16-bit × 2 slot = 512 kHz 太低,
+//   會讓晶片進入不穩定狀態 → 隨機 pop 蹦蹦聲。32kHz × 32-bit × 2 = 2.048 MHz 才穩。
+#define SAMPLE_RATE 32000
 #define TONE_FREQ   440.0f      // A4「La」音
 #define BUF_SAMPLES 512
 #define AMPLITUDE   16000       // 16-bit 最大 32767,用半幅避免吵到鄰居
@@ -51,7 +54,8 @@ void initI2S() {
 
   i2s_std_config_t std_cfg = {};
   std_cfg.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE);
-  std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+  // 32-bit slot:跟 Play_Test 一致,16-bit 樣本送進去前左移 16 擴展
+  std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
   std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;   // 送 L+R(MAX98357A SD 浮空 = 混音)
 
   std_cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
@@ -101,11 +105,12 @@ void setup() {
 void loop() {
   static float phase = 0.0f;
   const float phaseInc = 2.0f * M_PI * TONE_FREQ / SAMPLE_RATE;
-  static int16_t buf[BUF_SAMPLES];
+  static int32_t buf[BUF_SAMPLES];   // 32-bit 因為 I²S slot 是 32-bit
 
-  // 產生一塊正弦波 samples
+  // 產生一塊正弦波 samples,16-bit sine 左移 16 變 32-bit MSB-aligned
   for (int i = 0; i < BUF_SAMPLES; i++) {
-    buf[i] = (int16_t)(sinf(phase) * AMPLITUDE);
+    int16_t s16 = (int16_t)(sinf(phase) * AMPLITUDE);
+    buf[i] = (int32_t)s16 << 16;
     phase += phaseInc;
     if (phase >= 2.0f * M_PI) phase -= 2.0f * M_PI;
   }
