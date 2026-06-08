@@ -94,9 +94,10 @@ void setup() {
 
   neopixelWrite(48, 0, 0, 0);   // 關 RGB LED
 
-  // MAX98357A SD 拉高啟用(沒拉的話 SD 腳浮空 → MAX 進 shutdown → 沒聲音)
+  // MAX98357A SD 預設拉低(保持 shutdown,避免 boot 時喇叭聽到雜訊)
+  // I²S 跑起來後再拉高啟用
   pinMode(PIN_AMP_SD, OUTPUT);
-  digitalWrite(PIN_AMP_SD, HIGH);
+  digitalWrite(PIN_AMP_SD, LOW);
 
   // SPI + SD(不卡死,SD 失敗也讓 setup 跑完)
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
@@ -108,6 +109,20 @@ void setup() {
   // I²S
   initI2S();
   Serial.println("[+] I²S 初始化完成");
+
+  // 預先灌幾批靜音 sample 進 I²S DMA buffer,讓 MAX98357A 醒來看到的是
+  // 穩定的 0 訊號,而不是 startup 階段的隨機 DOUT(消除 boot pop)
+  int32_t silence[BUF_SAMPLES] = {0};
+  size_t bytesWritten = 0;
+  for (int i = 0; i < 4; i++) {
+    i2s_channel_write(tx_handle, silence, sizeof(silence), &bytesWritten,
+                      100 / portTICK_PERIOD_MS);
+  }
+  delay(20);
+
+  // I²S 穩定後才啟用 MAX98357A,不會聽到 boot 雜訊
+  digitalWrite(PIN_AMP_SD, HIGH);
+  Serial.println("[+] MAX98357A 啟用(I²S 已穩定)");
 
   if (sdOK) {
     openWav();
