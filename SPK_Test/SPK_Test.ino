@@ -43,6 +43,10 @@ i2s_chan_handle_t tx_handle = NULL;
 
 void initI2S() {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  // 預設只 6 × 240 = 1440 samples ≈ 90ms,太小容易 underrun
+  // 加到 8 × 480 = 3840 samples ≈ 240ms,留更多餘裕
+  chan_cfg.dma_desc_num  = 8;
+  chan_cfg.dma_frame_num = 480;
   i2s_new_channel(&chan_cfg, &tx_handle, NULL);   // 只要 TX
 
   i2s_std_config_t std_cfg = {};
