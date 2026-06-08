@@ -2,5 +2,3 @@ default_profile: esp32s3_n16r8
 profiles:
   esp32s3_n16r8:
     fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,DebugLevel=none,PSRAM=opi,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default
-    platforms:
-      - platform: esp32:esp32 (3.3.9)
