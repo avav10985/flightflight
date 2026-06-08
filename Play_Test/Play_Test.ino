@@ -35,6 +35,7 @@
 #define PIN_BCLK       11
 #define PIN_WS         12
 #define PIN_DOUT       13
+#define PIN_AMP_SD     18    // MAX98357A SD(shutdown 控制),HIGH = 啟用、LOW = 休眠靜音
 
 #define SAMPLE_RATE    32000
 #define BUF_SAMPLES    512
@@ -92,6 +93,10 @@ void setup() {
   Serial.println("========================================");
 
   neopixelWrite(48, 0, 0, 0);   // 關 RGB LED
+
+  // MAX98357A SD 拉高啟用(沒拉的話 SD 腳浮空 → MAX 進 shutdown → 沒聲音)
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, HIGH);
 
   // SPI + SD(不卡死,SD 失敗也讓 setup 跑完)
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
