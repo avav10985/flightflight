@@ -550,14 +550,15 @@ void setup() {
     delay(1500);
   }
 
-  // I²S duplex 一次性啟動,以後不切換(避免 end/begin 切模式造成讀寫失敗)
-  i2sInitOnce();
-
   scanFiles();
   Serial.printf("[+] 找到 %d 個錄音\n", fileCount);
 
   drawMenuStatic();
   drawMenuDynamic();
+
+  // I²S duplex 一次性啟動(放在 TFT 後面,避免 i2s.begin 萬一掛住看不到畫面)
+  i2sInitOnce();
+
   Serial.println("[+] 就緒,按肩鍵 L 開始");
 }
 
