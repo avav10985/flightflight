@@ -101,6 +101,8 @@ File          playFile;
 uint32_t      playBytes  = 0;
 uint32_t      playTotal  = 0;
 
+int           g_recDbgCount = 0;   // doRecChunk debug 計數,每次 startRec 重置
+
 // I²S 模式追蹤:避免重複 end()/begin()
 enum I2SMode { I2S_OFF, I2S_TX_ONLY, I2S_RX_ONLY };
 I2SMode i2sMode = I2S_OFF;
@@ -436,8 +438,6 @@ void startRec() {
   g_recDbgCount = 0;   // 重置 doRecChunk 的 debug count
   Serial.printf("[+] 開始錄音:%s\n", name.c_str());
 }
-
-int g_recDbgCount = 0;   // 每次 startRec 重置,印 doRecChunk 前 5 次的 readBytes 結果
 
 void doRecChunk() {
   int32_t raw[BUF_SAMPLES];
