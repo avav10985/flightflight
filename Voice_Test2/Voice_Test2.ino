@@ -408,9 +408,9 @@ void startRec() {
 
 void doRecChunk() {
   int32_t raw[BUF_SAMPLES];
-  // 用 i2s.read 而不是 readBytes:read 是 ESP_I2S.h 自己的方法,
-  // 直接從 DMA buffer 拿,readBytes 是 Stream 介面會 block 1秒等資料
-  size_t bytesRead = i2s.read((uint8_t*)raw, sizeof(raw));
+  // I2SClass.read() 只回 int 單樣本,沒 (buf, size) 版,要用 Stream 介面 readBytes
+  // duplex 一次性 init 後 RX DMA 一直在跑,readBytes 會立刻拿到資料,不會 timeout
+  size_t bytesRead = i2s.readBytes((char*)raw, sizeof(raw));
   if (bytesRead == 0) return;
   int samples = bytesRead / 4;
   int16_t pcm[BUF_SAMPLES];
