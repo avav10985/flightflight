@@ -8,6 +8,14 @@ param(
   [int]$Baud = 115200
 )
 
+# Auto-refresh PATH from registry (covers winget installs from prior sessions)
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+if (-not (Get-Command arduino-cli -ErrorAction SilentlyContinue)) {
+  Write-Host "[ERROR] arduino-cli not found in PATH" -ForegroundColor Red
+  exit 1
+}
+
 if (-not $Port) {
   $boardList = arduino-cli board list --format json | ConvertFrom-Json
   $ports = if ($boardList.detected_ports) { $boardList.detected_ports } else { $boardList }

@@ -15,9 +15,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Auto-refresh PATH from registry (covers winget installs from prior sessions)
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
 # Check arduino-cli
 if (-not (Get-Command arduino-cli -ErrorAction SilentlyContinue)) {
-  Write-Host "[ERROR] arduino-cli not found in PATH" -ForegroundColor Red
+  Write-Host "[ERROR] arduino-cli not found in PATH (even after refresh)" -ForegroundColor Red
   Write-Host "Install: winget install ArduinoSA.CLI"
   exit 1
 }
