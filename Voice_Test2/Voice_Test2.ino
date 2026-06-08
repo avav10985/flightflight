@@ -593,6 +593,11 @@ void loop() {
   // 只在「鬆開 → 按下」瞬間 fire,鄰近 button 互跳不會誤觸發
   bool btnEdge = (lastBtn == BTN_NONE && btn != BTN_NONE);
   lastBtn = btn;
+  // Debug:btnEdge 觸發時印一行,看實際是哪個 button + ADC 多少
+  if (btnEdge) {
+    Serial.printf("[btn] edge btn=%d (1=+ 2=- 3=OK 4=back) v=%d\n",
+                  btn, analogRead(PIN_MENU_BTN));
+  }
 
   bool shldL = (digitalRead(PIN_SHOULDER_L) == LOW);
   static bool lastShldL = false;
