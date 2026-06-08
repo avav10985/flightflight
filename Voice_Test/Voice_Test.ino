@@ -92,8 +92,10 @@ LGFX tft;
 #define PIN_MENU_BTN     7
 #define PIN_SHOULDER_L   8
 #define PIN_AMP_SD       18     // MAX98357A SD(shutdown 控制),LOW=休眠靜音、HIGH=啟用播放
-#define PIN_MIC_PWR      17     // INMP441 VDD 控制(GPIO 直接供電 ~1.4mA OK)
-                                // 播放時拉低 → INMP441 斷電 → SD 線停止 → 不干擾 MAX
+// 註:撤回了「INMP441 VDD 改 GPIO 17」的硬體改動。改用軟體解法 ——
+// 播放時 i2s_channel_disable(i2s_rx) 停 RX DMA,效果一樣,不用拉線。
+// 既存證明:Play_Test(只 init TX channel,沒 RX DMA 跑)聲音乾淨,
+// 跟 INMP441 是否通電無關。
 
 // === 錄音參數 ===
 // 16 kHz 會讓 BCLK = 1.024 MHz,低於 INMP441 規格最小 1.45 MHz 出怪雜訊
@@ -407,10 +409,9 @@ void startRec() {
     Serial.println("[!] 無法開啟錄音檔");
     return;
   }
-  // 互斥啟用:關 MAX(不影響 INM 讀值)+ 確保 INMP441 通電
-  digitalWrite(PIN_AMP_SD,  LOW);    // MAX 休眠,避免電源耦合到 INM
-  digitalWrite(PIN_MIC_PWR, HIGH);   // INMP441 通電(預設應該已開,保險)
-  delay(50);                         // INMP441 上電 wakeup ~30ms,給 50ms 安全
+  // 軟體互斥:停 I²S TX DMA(避免閒置 TX DMA 干擾 RX timing)+ 確認 MAX 休眠
+  digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠
+  i2s_channel_disable(i2s_tx);       // 停 TX DMA
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -445,6 +446,7 @@ void doRecChunk() {
 void stopRec() {
   writeWavHeader(recFile, recBytes);
   recFile.close();
+  i2s_channel_enable(i2s_tx);        // 恢復 TX DMA(下次播放用得到)
   Serial.printf("[+] 錄音結束,寫入 %lu bytes\n", recBytes);
   scanFiles();
   cursor = fileCount - 1;
@@ -471,8 +473,10 @@ void startPlay() {
   playBytes = 0;
   playTotal = fsize - 44;
   state     = ST_PLAY;
-  // 互斥啟用:關 INMP441(切斷 SD 線干擾)+ 開 MAX
-  digitalWrite(PIN_MIC_PWR, LOW);   // 斷 INMP441 電源 → SD 線停止活動 → 不干擾 MAX
+  // 軟體互斥:停 I²S RX DMA(背景 INM 讀取會干擾 TX timing)+ 開 MAX
+  // 經實證:Play_Test 沒 RX channel 所以乾淨,Voice_Test 雙工模式 RX DMA 背景跑
+  // 才造成播放雜訊。INMP441 不用斷電,停 RX DMA 就夠
+  i2s_channel_disable(i2s_rx);      // 停 RX DMA
   digitalWrite(PIN_AMP_SD,  HIGH);  // 解除 MAX98357A 休眠
   Serial.printf("[+] 播放:%s (%lu bytes 音訊)\n", path.c_str(), playTotal);
 }
@@ -501,9 +505,9 @@ void doPlayChunk() {
 
 void stopPlay() {
   playFile.close();
-  // 互斥邏輯反過來:關 MAX + 開 INMP441(等待 30ms 喚醒)
-  digitalWrite(PIN_AMP_SD,  LOW);    // 進 MAX98357A 休眠,不再「沙沙」
-  digitalWrite(PIN_MIC_PWR, HIGH);   // 重新供電 INMP441,下次錄音用得到
+  // 反過來:關 MAX + 恢復 I²S RX DMA(下次錄音用得到)
+  digitalWrite(PIN_AMP_SD, LOW);     // MAX98357A 休眠
+  i2s_channel_enable(i2s_rx);        // 恢復 RX DMA
   Serial.println("[+] 播放結束");
   state = ST_MENU;
 }
@@ -522,10 +526,6 @@ void setup() {
   // MAX98357A SD 預設拉低(休眠),沒在播放時不會「沙沙」
   pinMode(PIN_AMP_SD, OUTPUT);
   digitalWrite(PIN_AMP_SD, LOW);
-
-  // INMP441 預設通電(待機可以馬上開始錄音);播放時程式會拉低關掉
-  pinMode(PIN_MIC_PWR, OUTPUT);
-  digitalWrite(PIN_MIC_PWR, HIGH);
 
   analogReadResolution(12);
 
