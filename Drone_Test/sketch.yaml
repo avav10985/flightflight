@@ -3,4 +3,4 @@ profiles:
   lolin_d32:
     fqbn: esp32:esp32:lolin_d32:UploadSpeed=921600,FlashFreq=80,FlashSize=4M,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,DebugLevel=none,LoopCore=1,EventsCore=0,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default
     platforms:
-      - platform: esp32:esp32 (3.3.8)
+      - platform: esp32:esp32 (3.3.9)
