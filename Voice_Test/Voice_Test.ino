@@ -135,15 +135,32 @@ uint32_t      playBytes  = 0;
 uint32_t      playTotal  = 0;
 
 // ============================================================
-// 按鈕讀取(電阻階梯,同 Ground_TX_ESP32 的門檻)
-// 2026-06-07 試燒實測門檻(+ 3830、− 2660、OK 1925、返回 1180)取中點
+// 按鈕讀取:4 樣本平均 + 50ms 時間穩定去抖(移植自 Voice_Test2)
+// threshold 拉低給 OK 更多 margin,避免飄到 BACK 範圍誤觸發
 int readMenuBtn() {
-  int v = analogRead(PIN_MENU_BTN);
-  if (v > 3300) return BTN_PLUS;
-  if (v > 2300) return BTN_MINUS;
-  if (v > 1550) return BTN_OK;
-  if (v >  600) return BTN_BACK;
-  return BTN_NONE;
+  static int  candidate     = BTN_NONE;
+  static unsigned long candidateStart = 0;
+  static int  stableReading = BTN_NONE;
+
+  int v = 0;
+  for (int i = 0; i < 4; i++) v += analogRead(PIN_MENU_BTN);
+  v /= 4;
+
+  int raw;
+  if      (v > 3000) raw = BTN_PLUS;
+  else if (v > 2100) raw = BTN_MINUS;
+  else if (v > 1200) raw = BTN_OK;
+  else if (v >  400) raw = BTN_BACK;
+  else               raw = BTN_NONE;
+
+  if (raw != candidate) {
+    candidate      = raw;
+    candidateStart = millis();
+  }
+  if (millis() - candidateStart >= 50) {
+    stableReading = candidate;
+  }
+  return stableReading;
 }
 
 // ============================================================
@@ -611,7 +628,7 @@ void loop() {
   // 按鈕 edge 偵測
   int btn = readMenuBtn();
   static int  lastBtn = BTN_NONE;
-  bool btnEdge = (btn != lastBtn && btn != BTN_NONE);
+  bool btnEdge = (lastBtn == BTN_NONE && btn != BTN_NONE);   // 只在「鬆開→按下」fire,鄰近 button 互跳不誤觸
   lastBtn = btn;
 
   bool shldL = (digitalRead(PIN_SHOULDER_L) == LOW);
