@@ -399,6 +399,18 @@ void drawPlayDynamic() {
 // ============================================================
 // 開始錄音
 void startRec() {
+  if (!sdOK) {
+    Serial.println("[!] SD 卡沒接,不能錄音");
+    // TFT 提示 1.5 秒
+    tft.fillRect(0, 280, 240, 40, TFT_RED);
+    tft.setFont(&fonts::efontTW_16);
+    tft.setTextColor(TFT_WHITE, TFT_RED);
+    tft.setCursor(10, 290);
+    tft.print("先插 SD 卡再試錄音");
+    delay(1500);
+    drawMenu();  // 回選單畫面
+    return;
+  }
   String name = nextRecFilename();
   if (name.length() == 0) {
     Serial.println("[!] 沒有可用檔名(REC_999 已用完)");
@@ -456,6 +468,18 @@ void stopRec() {
 // ============================================================
 // 開始播放
 void startPlay() {
+  if (!sdOK) {
+    Serial.println("[!] SD 卡沒接,不能播放");
+    tft.fillRect(0, 280, 240, 40, TFT_RED);
+    tft.setFont(&fonts::efontTW_16);
+    tft.setTextColor(TFT_WHITE, TFT_RED);
+    tft.setCursor(10, 290);
+    tft.print("先插 SD 卡再試播放");
+    delay(1500);
+    drawMenuStatic();
+    drawMenuDynamic();
+    return;
+  }
   if (cursor < 0 || cursor >= fileCount) return;
   String path = "/" + fileList[cursor];
   playFile = SD.open(path.c_str(), FILE_READ);
@@ -553,14 +577,16 @@ void setup() {
   tft.setCursor(5, 28);
   tft.print("初始化中...");
 
-  // 如果 SD 失敗,TFT 上補紅字然後停在這
+  // SD 失敗:不卡死,只在 TFT 補紅字提示,繼續進系統
+  // 使用者在選單瀏覽 / 設定還能用,只有按 OK 播放 或 按肩鍵錄音時才會提示
   if (!sdOK) {
     tft.setCursor(5, 55);
     tft.setTextColor(TFT_RED, TFT_BLACK);
-    tft.print("SD 掛載失敗!");
+    tft.print("SD 卡未接(可繼續用)");
     tft.setCursor(5, 80);
-    tft.print("檢查 SD 模組接線");
-    while (1) delay(1000);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.print("錄/播時要插 SD 卡");
+    delay(1500);   // 給使用者 1.5 秒看訊息
   }
 
   // I²S

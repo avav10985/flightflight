@@ -93,25 +93,25 @@ void setup() {
 
   neopixelWrite(48, 0, 0, 0);   // 關 RGB LED
 
-  // SPI + SD
+  // SPI + SD(不卡死,SD 失敗也讓 setup 跑完)
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
-  if (!SD.begin(PIN_SD_CS, SPI)) {
-    Serial.println("[!] SD 掛載失敗");
-    while (1) delay(1000);
-  }
-  Serial.println("[+] SD 掛載成功");
+  sdOK = SD.begin(PIN_SD_CS, SPI);
+  Serial.println(sdOK ? "[+] SD 掛載成功" : "[!] SD 沒接,進入閒置(插卡後重啟才會跑)");
 
   // I²S
   initI2S();
   Serial.println("[+] I²S 初始化完成");
 
-  openWav();
-  Serial.println("[+] 進入循環播放,聽聽看雜訊還在嗎");
+  if (sdOK) {
+    openWav();
+    Serial.println("[+] 進入循環播放,聽聽看雜訊還在嗎");
+  }
 }
 
 void loop() {
+  if (!sdOK) { delay(500); return; }   // SD 沒接就閒置,等使用者插卡 + 重啟
   static uint8_t  pcmBuf[BUF_SAMPLES * 2];
   static int32_t  tx[BUF_SAMPLES];
 
