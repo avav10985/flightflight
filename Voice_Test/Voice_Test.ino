@@ -210,7 +210,9 @@ void initI2S() {
   tx_cfg.gpio_cfg = gpio_cfg;
   i2s_channel_init_std_mode(i2s_tx, &tx_cfg);
 
-  // 只啟用 TX,RX 等錄音才啟用(平常不跑 RX DMA = 跟 Play_Test 一樣乾淨)
+  // TX 跟 RX 都啟用(duplex 全開):避免 stopRec disable RX 把共用 BCLK 一起停
+  // → 之後 play 沒時脈沒聲音。USB 雜訊問題用拔 USB 解,不是用 enable/disable。
+  i2s_channel_enable(i2s_rx);
   i2s_channel_enable(i2s_tx);
 }
 
@@ -423,8 +425,7 @@ void startRec() {
     return;
   }
   digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠(不影響錄音)
-  i2s_channel_enable(i2s_rx);        // 啟用 RX DMA,開始接 INMP441 資料
-  delay(30);                         // INMP441 wakeup + I²S 穩定
+  // RX 在 setup 已經啟用,這裡不再 enable/disable
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -459,7 +460,7 @@ void doRecChunk() {
 void stopRec() {
   writeWavHeader(recFile, recBytes);
   recFile.close();
-  i2s_channel_disable(i2s_rx);       // 關 RX DMA,回到無 RX 跑的乾淨狀態
+  // RX 不 disable,避免共用的 BCLK 一起停 → 之後 play 沒聲音
   Serial.printf("[+] 錄音結束,寫入 %lu bytes\n", recBytes);
   scanFiles();
   cursor = fileCount - 1;
