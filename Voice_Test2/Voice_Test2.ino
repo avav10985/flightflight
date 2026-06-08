@@ -120,13 +120,16 @@ void i2sStartTX() {
   i2sStop();
   // 只接 BCLK + WS + DOUT,DIN = -1 → INMP441 不被綁進 I²S
   i2s.setPins(PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, -1, -1);
+  // 32-bit slot:對齊原 Voice_Test 工作的配置,16-bit PCM 左移 16 擴展
+  // MAX98357A 對 32-bit STD slot 認得最穩
   bool ok = i2s.begin(I2S_MODE_STD, SAMPLE_RATE,
-                      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+                      I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
   if (!ok) {
     Serial.println("[!] i2s.begin (TX) 失敗");
     return;
   }
   i2sMode = I2S_TX_ONLY;
+  Serial.printf("[+] I²S TX 啟動 32-bit MONO @%dHz\n", SAMPLE_RATE);
 }
 
 void i2sStartRX() {
@@ -495,7 +498,7 @@ void startPlay() {
   state     = ST_PLAY;
   i2sStartTX();                       // 切到 TX-only 模式(INMP441 沒被綁進 I²S)
   digitalWrite(PIN_AMP_SD, HIGH);     // 解除 MAX 休眠
-  Serial.printf("[+] 播放:%s (%lu bytes)\n", path.c_str(), playTotal);
+  Serial.printf("[+] 播放:%s (%lu bytes),AMP_SD=HIGH\n", path.c_str(), playTotal);
 }
 
 void doPlayChunk() {
@@ -505,9 +508,22 @@ void doPlayChunk() {
   if (toRead == 0) { stopPlay(); return; }
   int n = playFile.read(pcmBuf, toRead);
   if (n <= 0) { stopPlay(); return; }
-  // 直接寫 16-bit PCM,I2SClass 內部處理位元寬擴展
-  i2s.write(pcmBuf, n);
+  // 16-bit PCM → 32-bit MSB-aligned(<< 16)寫進 I²S
+  int samples = n / 2;
+  int32_t tx[BUF_SAMPLES];
+  int16_t *pcm = (int16_t*)pcmBuf;
+  for (int i = 0; i < samples; i++) {
+    tx[i] = (int32_t)pcm[i] << 16;
+  }
+  size_t written = i2s.write((uint8_t*)tx, samples * 4);
   playBytes += n;
+  // 第一次寫入時 debug 確認有寫進去
+  static bool firstWrite = true;
+  if (firstWrite) {
+    Serial.printf("[i2s] 第一次 write: 給 %d bytes,實際寫入 %u bytes\n",
+                  samples * 4, (unsigned)written);
+    firstWrite = false;
+  }
 }
 
 void stopPlay() {
