@@ -145,13 +145,21 @@ void i2sStartRX() {
 }
 
 // ============================================================
-// 階梯按鈕(門檻同 Ground_TX_ESP32)
+// 階梯按鈕 + 3 票去抖動(ADC 雜訊讓鄰近 button 互跳會被擋下來)
 int readMenuBtn() {
+  static int history[3] = {BTN_NONE, BTN_NONE, BTN_NONE};
+  static int idx = 0;
   int v = analogRead(PIN_MENU_BTN);
-  if (v > 3300) return BTN_PLUS;
-  if (v > 2300) return BTN_MINUS;
-  if (v > 1550) return BTN_OK;
-  if (v >  600) return BTN_BACK;
+  int reading;
+  if      (v > 3300) reading = BTN_PLUS;
+  else if (v > 2300) reading = BTN_MINUS;
+  else if (v > 1550) reading = BTN_OK;
+  else if (v >  600) reading = BTN_BACK;
+  else               reading = BTN_NONE;
+  history[idx] = reading;
+  idx = (idx + 1) % 3;
+  // 3 次連續同值才回報(~60ms 穩定)
+  if (history[0] == history[1] && history[1] == history[2]) return reading;
   return BTN_NONE;
 }
 
@@ -241,34 +249,69 @@ void drawMenuStatic() {
   tft.print("返回:重新掃描");
 }
 
+// 上次畫到 TFT 的狀態(partial redraw 用)
+int g_drawnCursor    = -1;
+int g_drawnViewTop   = -1;
+int g_drawnFileCount = -1;
+
+// 畫單一列(row_idx = 0~9,file_idx = 該列對應的檔案編號)
+void drawMenuRow(int row_idx, int file_idx) {
+  int y       = 38 + row_idx * 24;
+  bool sel    = (file_idx == cursor);
+  uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
+  uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
+  tft.fillRect(0, y, 240, 24, bg);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(10, y + 5);
+  tft.print(sel ? "> " : "  ");
+  tft.print(fileList[file_idx]);
+}
+
 void drawMenuDynamic() {
-  tft.fillRect(0, 32, 240, 248, TFT_BLACK);
-  tft.setFont(&fonts::efontTW_14);
+  // 沒檔案的空狀態(只畫一次)
   if (fileCount == 0) {
+    if (g_drawnFileCount == 0) return;   // 已經畫過,跳過
+    tft.fillRect(0, 32, 240, 248, TFT_BLACK);
+    tft.setFont(&fonts::efontTW_14);
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.setCursor(10, 100);
     tft.print("(SD 沒錄音檔)");
     tft.setCursor(10, 130);
     tft.print("按肩鍵 L 開始錄第一段");
+    g_drawnFileCount = 0;
+    g_drawnCursor    = -1;
+    g_drawnViewTop   = -1;
     return;
   }
+
   const int rows = 10;
   if (cursor < viewTop)            viewTop = cursor;
   if (cursor >= viewTop + rows)    viewTop = cursor - rows + 1;
   if (viewTop > fileCount - rows)  viewTop = max(0, fileCount - rows);
   if (viewTop < 0)                 viewTop = 0;
-  for (int i = 0; i < rows && (viewTop + i) < fileCount; i++) {
-    int idx     = viewTop + i;
-    int y       = 38 + i * 24;
-    bool sel    = (idx == cursor);
-    uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
-    uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
-    tft.fillRect(0, y, 240, 24, bg);
-    tft.setTextColor(fg, bg);
-    tft.setCursor(10, y + 5);
-    tft.print(sel ? "> " : "  ");
-    tft.print(fileList[idx]);
+
+  tft.setFont(&fonts::efontTW_14);
+
+  // 視窗位置變了 / 檔案數變了 → 全部重畫
+  if (viewTop != g_drawnViewTop || fileCount != g_drawnFileCount) {
+    tft.fillRect(0, 32, 240, 248, TFT_BLACK);
+    for (int i = 0; i < rows && (viewTop + i) < fileCount; i++) {
+      drawMenuRow(i, viewTop + i);
+    }
   }
+  // 只游標移動 → 只重畫舊位置 + 新位置 2 列
+  else if (cursor != g_drawnCursor) {
+    if (g_drawnCursor >= viewTop && g_drawnCursor < viewTop + rows) {
+      drawMenuRow(g_drawnCursor - viewTop, g_drawnCursor);
+    }
+    if (cursor >= viewTop && cursor < viewTop + rows) {
+      drawMenuRow(cursor - viewTop, cursor);
+    }
+  }
+
+  g_drawnCursor    = cursor;
+  g_drawnViewTop   = viewTop;
+  g_drawnFileCount = fileCount;
 }
 
 void drawRecStatic() {
@@ -520,7 +563,12 @@ void setup() {
 // ============================================================
 void loop() {
   if (state != lastState) {
-    if      (state == ST_MENU) { drawMenuStatic(); drawMenuDynamic(); }
+    if      (state == ST_MENU) {
+      // 重置 partial-redraw 狀態,進選單時整個重畫
+      g_drawnCursor = -1; g_drawnViewTop = -1; g_drawnFileCount = -1;
+      drawMenuStatic();
+      drawMenuDynamic();
+    }
     else if (state == ST_REC)    drawRecStatic();
     else if (state == ST_PLAY)   drawPlayStatic();
     lastState = state;
@@ -528,7 +576,8 @@ void loop() {
 
   int btn = readMenuBtn();
   static int  lastBtn = BTN_NONE;
-  bool btnEdge = (btn != lastBtn && btn != BTN_NONE);
+  // 只在「鬆開 → 按下」瞬間 fire,鄰近 button 互跳不會誤觸發
+  bool btnEdge = (lastBtn == BTN_NONE && btn != BTN_NONE);
   lastBtn = btn;
 
   bool shldL = (digitalRead(PIN_SHOULDER_L) == LOW);
@@ -537,8 +586,7 @@ void loop() {
   lastShldL = shldL;
 
   if (state == ST_MENU) {
-    static int lastCursor = -1;
-    if (cursor != lastCursor) { drawMenuDynamic(); lastCursor = cursor; }
+    drawMenuDynamic();   // 內部會自動判斷要不要 redraw(partial / full / 跳過)
     if (shldLEdge) { startRec(); return; }
 
     // 右搖桿 Y 軸控制游標(連續推會加速捲動)
