@@ -210,7 +210,7 @@ void initI2S() {
   tx_cfg.gpio_cfg = gpio_cfg;
   i2s_channel_init_std_mode(i2s_tx, &tx_cfg);
 
-  i2s_channel_enable(i2s_rx);
+  // 只啟用 TX,RX 等錄音才啟用(平常不跑 RX DMA = 跟 Play_Test 一樣乾淨)
   i2s_channel_enable(i2s_tx);
 }
 
@@ -423,6 +423,8 @@ void startRec() {
     return;
   }
   digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠(不影響錄音)
+  i2s_channel_enable(i2s_rx);        // 啟用 RX DMA,開始接 INMP441 資料
+  delay(30);                         // INMP441 wakeup + I²S 穩定
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -457,6 +459,7 @@ void doRecChunk() {
 void stopRec() {
   writeWavHeader(recFile, recBytes);
   recFile.close();
+  i2s_channel_disable(i2s_rx);       // 關 RX DMA,回到無 RX 跑的乾淨狀態
   Serial.printf("[+] 錄音結束,寫入 %lu bytes\n", recBytes);
   scanFiles();
   cursor = fileCount - 1;
