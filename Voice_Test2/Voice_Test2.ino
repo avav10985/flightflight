@@ -145,22 +145,36 @@ void i2sStartRX() {
 }
 
 // ============================================================
-// 階梯按鈕 + 3 票去抖動(ADC 雜訊讓鄰近 button 互跳會被擋下來)
+// 階梯按鈕:4 樣本平均 + 50ms 時間穩定去抖
+// 之前 3-vote 還是會在「按 + 過程中 ADC 短暫停在 OK 範圍 3 次」誤觸發 OK。
+// 改成「同一個值要連續穩定 50ms 才當真」,徹底擋掉 transient 誤觸發。
 int readMenuBtn() {
-  static int history[3] = {BTN_NONE, BTN_NONE, BTN_NONE};
-  static int idx = 0;
-  int v = analogRead(PIN_MENU_BTN);
-  int reading;
-  if      (v > 3300) reading = BTN_PLUS;
-  else if (v > 2300) reading = BTN_MINUS;
-  else if (v > 1550) reading = BTN_OK;
-  else if (v >  600) reading = BTN_BACK;
-  else               reading = BTN_NONE;
-  history[idx] = reading;
-  idx = (idx + 1) % 3;
-  // 3 次連續同值才回報(~60ms 穩定)
-  if (history[0] == history[1] && history[1] == history[2]) return reading;
-  return BTN_NONE;
+  static int  candidate     = BTN_NONE;
+  static unsigned long candidateStart = 0;
+  static int  stableReading = BTN_NONE;
+
+  // 4 樣本平均消除 ADC 雜訊
+  int v = 0;
+  for (int i = 0; i < 4; i++) v += analogRead(PIN_MENU_BTN);
+  v /= 4;
+
+  int raw;
+  if      (v > 3300) raw = BTN_PLUS;
+  else if (v > 2300) raw = BTN_MINUS;
+  else if (v > 1550) raw = BTN_OK;
+  else if (v >  600) raw = BTN_BACK;
+  else               raw = BTN_NONE;
+
+  // 候選變了 → 重置計時;沒變 → 累計穩定時間
+  if (raw != candidate) {
+    candidate      = raw;
+    candidateStart = millis();
+  }
+  // 候選穩定 50ms 後才成為正式回報值
+  if (millis() - candidateStart >= 50) {
+    stableReading = candidate;
+  }
+  return stableReading;
 }
 
 // ============================================================
@@ -610,11 +624,28 @@ void loop() {
       }
     }
 
-    // 階梯按鈕(備用)
-    if (btnEdge) {
+    // 階梯按鈕:邊緣觸發 + 對 +/- 加自動連發(按住捲動長 list)
+    static unsigned long btnHoldStart   = 0;
+    static unsigned long lastBtnRepeat  = 0;
+    bool fireNav = false;
+    if (btnEdge && (btn == BTN_PLUS || btn == BTN_MINUS)) {
+      fireNav = true;
+      btnHoldStart = millis();
+    } else if (btn == BTN_NONE) {
+      btnHoldStart = 0;
+    } else if ((btn == BTN_PLUS || btn == BTN_MINUS) && btnHoldStart > 0) {
+      // 按住超過 500ms 後,每 200ms 自動連發一次
+      if (millis() - btnHoldStart > 500 && millis() - lastBtnRepeat > 200) {
+        fireNav = true;
+        lastBtnRepeat = millis();
+      }
+    }
+    if (fireNav) {
       if (btn == BTN_PLUS  && cursor > 0)             cursor--;
       if (btn == BTN_MINUS && cursor < fileCount - 1) cursor++;
-      if (btn == BTN_OK    && fileCount > 0)          startPlay();
+    }
+    if (btnEdge) {
+      if (btn == BTN_OK   && fileCount > 0) startPlay();
       if (btn == BTN_BACK) {
         Serial.println("[+] 重新掃描 SD");
         scanFiles();
