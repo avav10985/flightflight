@@ -101,21 +101,47 @@ File          playFile;
 uint32_t      playBytes  = 0;
 uint32_t      playTotal  = 0;
 
-// I²S 一次性 init(duplex 模式,開機 init 一次永遠不關)
-// 防雜訊改成 由 MAX98357A SD 腳控制(GPIO 18 拉低 = MAX 休眠)
-bool i2sReady = false;
-void i2sInitOnce() {
-  if (i2sReady) return;
-  // BCLK + WS + DOUT + DIN 都接,duplex 一次 init
-  i2s.setPins(PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, -1, PIN_I2S_DIN);
+// I²S 模式追蹤:避免重複 end()/begin()
+enum I2SMode { I2S_OFF, I2S_TX_ONLY, I2S_RX_ONLY };
+I2SMode i2sMode = I2S_OFF;
+
+// ============================================================
+// I²S 模式切換(核心防雜訊邏輯)
+// ============================================================
+void i2sStop() {
+  if (i2sMode != I2S_OFF) {
+    i2s.end();
+    i2sMode = I2S_OFF;
+  }
+}
+
+void i2sStartTX() {
+  if (i2sMode == I2S_TX_ONLY) return;
+  i2sStop();
+  // 只接 BCLK + WS + DOUT,DIN = -1 → INMP441 不被綁進 I²S
+  i2s.setPins(PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, -1, -1);
   bool ok = i2s.begin(I2S_MODE_STD, SAMPLE_RATE,
-                      I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
+                      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
   if (!ok) {
-    Serial.println("[!] i2s.begin (duplex) 失敗");
+    Serial.println("[!] i2s.begin (TX) 失敗");
     return;
   }
-  i2sReady = true;
-  Serial.printf("[+] I²S duplex 啟動 32-bit MONO @%dHz\n", SAMPLE_RATE);
+  i2sMode = I2S_TX_ONLY;
+}
+
+void i2sStartRX() {
+  if (i2sMode == I2S_RX_ONLY) return;
+  i2sStop();
+  // 只接 BCLK + WS + DIN,DOUT = -1 → MAX98357A 不被綁進 I²S
+  i2s.setPins(PIN_I2S_BCLK, PIN_I2S_WS, -1, -1, PIN_I2S_DIN);
+  bool ok = i2s.begin(I2S_MODE_STD, SAMPLE_RATE,
+                      I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO,
+                      I2S_STD_SLOT_LEFT);   // INMP441 L/R 接 GND → 左聲道
+  if (!ok) {
+    Serial.println("[!] i2s.begin (RX) 失敗");
+    return;
+  }
+  i2sMode = I2S_RX_ONLY;
 }
 
 // ============================================================
@@ -397,7 +423,9 @@ void startRec() {
     Serial.println("[!] 無法開啟錄音檔");
     return;
   }
-  digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠(不影響錄音)
+  digitalWrite(PIN_AMP_SD, LOW);     // MAX 休眠
+  i2sStartRX();                       // 切到 RX-only 模式(MAX 沒被綁進 I²S)
+  delay(30);                          // INMP441 wakeup
   uint8_t zeros[44] = {0};
   recFile.write(zeros, 44);
   recBytes   = 0;
@@ -408,8 +436,6 @@ void startRec() {
 
 void doRecChunk() {
   int32_t raw[BUF_SAMPLES];
-  // I2SClass.read() 只回 int 單樣本,沒 (buf, size) 版,要用 Stream 介面 readBytes
-  // duplex 一次性 init 後 RX DMA 一直在跑,readBytes 會立刻拿到資料,不會 timeout
   size_t bytesRead = i2s.readBytes((char*)raw, sizeof(raw));
   if (bytesRead == 0) return;
   int samples = bytesRead / 4;
@@ -428,6 +454,7 @@ void doRecChunk() {
 void stopRec() {
   writeWavHeader(recFile, recBytes);
   recFile.close();
+  i2sStop();                          // I²S 完全關 → BCLK/WS 停 → INMP441 完全靜
   Serial.printf("[+] 錄音結束,寫入 %lu bytes\n", recBytes);
   scanFiles();
   cursor = fileCount - 1;
@@ -466,8 +493,9 @@ void startPlay() {
   playBytes = 0;
   playTotal = fsize - 44;
   state     = ST_PLAY;
+  i2sStartTX();                       // 切到 TX-only 模式(INMP441 沒被綁進 I²S)
   digitalWrite(PIN_AMP_SD, HIGH);     // 解除 MAX 休眠
-  Serial.printf("[+] 播放:%s (%lu bytes),AMP_SD=HIGH\n", path.c_str(), playTotal);
+  Serial.printf("[+] 播放:%s (%lu bytes)\n", path.c_str(), playTotal);
 }
 
 void doPlayChunk() {
@@ -477,27 +505,15 @@ void doPlayChunk() {
   if (toRead == 0) { stopPlay(); return; }
   int n = playFile.read(pcmBuf, toRead);
   if (n <= 0) { stopPlay(); return; }
-  // 16-bit PCM → 32-bit MSB-aligned(<< 16)寫進 I²S
-  int samples = n / 2;
-  int32_t tx[BUF_SAMPLES];
-  int16_t *pcm = (int16_t*)pcmBuf;
-  for (int i = 0; i < samples; i++) {
-    tx[i] = (int32_t)pcm[i] << 16;
-  }
-  size_t written = i2s.write((uint8_t*)tx, samples * 4);
+  // 直接寫 16-bit PCM,I2SClass 內部處理位元寬擴展
+  i2s.write(pcmBuf, n);
   playBytes += n;
-  // 第一次寫入時 debug 確認有寫進去
-  static bool firstWrite = true;
-  if (firstWrite) {
-    Serial.printf("[i2s] 第一次 write: 給 %d bytes,實際寫入 %u bytes\n",
-                  samples * 4, (unsigned)written);
-    firstWrite = false;
-  }
 }
 
 void stopPlay() {
   playFile.close();
   digitalWrite(PIN_AMP_SD, LOW);      // MAX 休眠
+  i2sStop();                           // I²S 完全關 → BCLK/WS 停 → INMP441 完全靜
   Serial.println("[+] 播放結束");
   state = ST_MENU;
 }
@@ -550,15 +566,15 @@ void setup() {
     delay(1500);
   }
 
+  // I²S 不在 setup 啟動 — 等到實際要錄/放才 begin
+  // 待機狀態 BCLK/WS 完全不跑 → INMP441 完全靜音
+  Serial.println("[+] I²S 待機(BCLK 停)");
+
   scanFiles();
   Serial.printf("[+] 找到 %d 個錄音\n", fileCount);
 
   drawMenuStatic();
   drawMenuDynamic();
-
-  // I²S duplex 一次性啟動(放在 TFT 後面,避免 i2s.begin 萬一掛住看不到畫面)
-  i2sInitOnce();
-
   Serial.println("[+] 就緒,按肩鍵 L 開始");
 }
 
