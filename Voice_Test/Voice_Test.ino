@@ -408,7 +408,8 @@ void startRec() {
     tft.setCursor(10, 290);
     tft.print("先插 SD 卡再試錄音");
     delay(1500);
-    drawMenu();  // 回選單畫面
+    drawMenuStatic();
+    drawMenuDynamic();
     return;
   }
   String name = nextRecFilename();
