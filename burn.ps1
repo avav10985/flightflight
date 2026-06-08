@@ -37,7 +37,9 @@ if (-not (Test-Path $sketchPath)) {
 if (-not $Port) {
   Write-Host "[*] Detecting connected boards..." -ForegroundColor Cyan
   $boardList = arduino-cli board list --format json | ConvertFrom-Json
-  $candidates = @($boardList | Where-Object { $_.port.address -match "COM" })
+  # arduino-cli 1.x wraps results in detected_ports
+  $ports = if ($boardList.detected_ports) { $boardList.detected_ports } else { $boardList }
+  $candidates = @($ports | Where-Object { $_.port.address -match "COM" })
 
   if ($candidates.Count -eq 0) {
     Write-Host "[ERROR] No COM board detected. Check:" -ForegroundColor Red
