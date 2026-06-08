@@ -590,12 +590,12 @@ void loop() {
     if (shldLEdge) { startRec(); return; }
 
     // 右搖桿 Y 軸控制游標(連續推會加速捲動)
-    // 推上(ADC < 1000)→ 游標上;推下(ADC > 3000)→ 游標下
+    // 推上(ADC > 3000)→ 游標上;推下(ADC < 1000)→ 游標下
     static unsigned long lastJoyMove = 0;
     static unsigned long joyHoldSince = 0;
     int joyY = analogRead(PIN_JOY_PITCH);
-    bool joyUp   = (joyY < 1000);
-    bool joyDown = (joyY > 3000);
+    bool joyUp   = (joyY > 3000);
+    bool joyDown = (joyY < 1000);
     if (!joyUp && !joyDown) {
       joyHoldSince = 0;   // 回中位重置加速計時
     } else {
