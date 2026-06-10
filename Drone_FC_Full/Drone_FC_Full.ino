@@ -187,10 +187,11 @@ double        gps_lon = 0;
 uint8_t       gps_sat = 0;
 bool          gps_fix = false;
 
-// ---- PID 增益(測試用初始值;實際飛起來後再調) ----
-// 之前在 PID 階段拘束測試摸出來的值,還沒實飛驗證最終值
-float Kp_rp = 2.0f, Ki_rp = 0.02f, Kd_rp = 0.5f;
-float Kp_y  = 1.5f, Ki_y  = 0.02f;
+// ---- PID 增益(2026-06-09 降到保守值:輕推搖桿馬達不會狂轉)----
+// 之前 Kp_rp=2.0 太激進,改成 1.0 比較溫和。實飛驗證後再加大。
+// Serial 指令 `kp 1.5` 之類可以即時調整,不用重燒。
+float Kp_rp = 1.0f, Ki_rp = 0.01f, Kd_rp = 0.3f;
+float Kp_y  = 0.8f, Ki_y  = 0.01f;
 
 // ============================================================
 // Mode 02 GPS 自動導航 — 純數學 + 狀態機骨架(2026-06-04)
@@ -351,8 +352,10 @@ const char* navStateName(NavState s) {
 }
 
 const float I_LIMIT     = 100.0f;
-const float MAX_ANGLE   = 30.0f;
-const float MAX_YAWRATE = 90.0f;
+// 2026-06-09 從 30° 降到 15°:30° 太激進,輕推搖桿馬達就猛轉
+const float MAX_ANGLE   = 15.0f;
+// 2026-06-09 從 90°/s 降到 45°/s:同樣保守
+const float MAX_YAWRATE = 45.0f;
 
 float i_roll = 0, i_pitch = 0, i_yaw = 0;
 float rollOut = 0, pitchOut = 0, yawOut = 0;
