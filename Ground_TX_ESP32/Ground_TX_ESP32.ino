@@ -236,6 +236,7 @@ byte readSwitch3(int pin) {
 // 全 redraw flag:drawFlightStatic 設 true,drawFlightDynamic 第一次跑會強制重畫所有
 // (從 PID 選單返回後 mode 沒變但畫面被清掉,沒這個會空一片)
 bool g_flightDirty = false;
+bool g_menuDirty   = false;
 
 // 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
 // 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
@@ -436,6 +437,7 @@ void drawMenuStatic() {
   tft.print("右搖桿:游標  +/-:調值");
   tft.setCursor(5, 302);
   tft.print("OK:送出    返回:離開");
+  g_menuDirty = true;   // 進選單後第一次 drawMenuDynamic 強制畫所有列
 }
 
 void drawMenuDynamic() {
@@ -450,7 +452,7 @@ void drawMenuDynamic() {
     bool wasSel = (i == lastCursor);
     bool valChanged = (lastVal[i] != params[i].val);
 
-    if (sel != wasSel || valChanged || lastCursor == -1) {
+    if (sel != wasSel || valChanged || lastCursor == -1 || g_menuDirty) {
       int y = 40 + i * rowH;
       uint16_t bg = sel ? TFT_DARKGREEN : TFT_BLACK;
       uint16_t fg = sel ? TFT_YELLOW    : TFT_WHITE;
@@ -471,6 +473,7 @@ void drawMenuDynamic() {
     }
   }
   lastCursor = menuCursor;
+  g_menuDirty = false;
 }
 
 // ============================================================
