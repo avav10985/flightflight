@@ -462,7 +462,18 @@ void setup() {
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
   // NRF24
-  radio.begin();
+  Serial.print("[*] NRF24 radio.begin() ... ");
+  bool nrfOK = radio.begin();
+  Serial.println(nrfOK ? "OK" : "FAIL");
+  Serial.printf("[*] NRF24 chip connected: %s\n",
+                radio.isChipConnected() ? "YES" : "NO ⚠️ 模組沒回應 SPI");
+  if (!nrfOK || !radio.isChipConnected()) {
+    Serial.println("[!] 手把 NRF24 init 失敗,通常是:");
+    Serial.println("    1. 100µF 電容沒焊");
+    Serial.println("    2. CE/CSN/SCK/MISO/MOSI 接線錯");
+    Serial.println("    3. 模組壞了");
+    Serial.println("    4. 3V3 軌電壓不夠");
+  }
   radio.openWritingPipe(PIPE_OUT);
   radio.setChannel(NRF_CHANNEL);
   radio.setAutoAck(true);
@@ -527,14 +538,25 @@ void loop() {
 
   readInputs(mode);
 
-  // 送指令 + 收遙測（ACK payload）
-  if (radio.write(&data, sizeof(Signal))) {
+  // 送指令 + 收遙測(ACK payload)
+  // Debug:每秒印一次 TX 統計,看到底有沒有送出去 + 飛機有沒有 ACK 回來
+  static uint32_t txOk = 0, txFail = 0, lastTxStat = 0;
+  bool ok = radio.write(&data, sizeof(Signal));
+  if (ok) {
+    txOk++;
     if (radio.isAckPayloadAvailable()) {
       radio.read(&tele, sizeof(tele));
       teleOK = true;
     }
   } else {
+    txFail++;
     teleOK = false;
+  }
+  if (millis() - lastTxStat > 1000) {
+    lastTxStat = millis();
+    Serial.printf("[NRF] TX ok=%lu fail=%lu (1 秒內) | mode=%02d throttle=%d\n",
+                  txOk, txFail, data.mode, data.throttle);
+    txOk = 0; txFail = 0;
   }
   data.paramID = 0;   // 參數送完清掉
 
