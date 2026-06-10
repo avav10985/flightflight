@@ -47,18 +47,20 @@ float lastGamma = 0;   // -90~90,繞 Y 軸(roll,左右傾)
 unsigned long lastDataMs = 0;
 
 // 寫入 servo,把手機角度映射成 servo 角度
+// 2026-06-09 改用 beta + gamma(手機橫放上下左右直觀對應),不用 alpha(指南針)
 void writeServos() {
-  // alpha 0~360 → pan servo 0~180(取一半範圍 ±90°,避免 servo 卡死)
-  // 把 alpha 看成 -180~+180:把 alpha 大於 180 的減 360
-  float yaw = lastAlpha;
-  if (yaw > 180) yaw -= 360;
-  // yaw 範圍 -180~+180,clamp 到 ±60 後映射到 servo 30~150
-  yaw = constrain(yaw, -60.0f, 60.0f);
-  int pan = map((int)yaw, -60, 60, 30, 150);
+  // γ(gamma,-90~+90)左右傾 → pan servo
+  // 手機左傾 = γ 負 → pan 左
+  // 手機右傾 = γ 正 → pan 右
+  float panAngle = constrain(lastGamma, -60.0f, 60.0f);
+  int pan = map((int)panAngle, -60, 60, 30, 150);
 
-  // beta -90~+90 → tilt servo 30~150
-  float pitch = constrain(lastBeta, -60.0f, 60.0f);
-  int tilt = map((int)pitch, -60, 60, 30, 150);
+  // β(beta,-180~+180)上下傾 → tilt servo
+  // 手機後拉(上緣靠近)= β 正 → tilt 上
+  // 手機前推(上緣推離)= β 負 → tilt 下
+  // 橫放時 β 圍繞 ±90 附近,clamp 在 ±60 中心
+  float tiltAngle = constrain(lastBeta, -60.0f, 60.0f);
+  int tilt = map((int)tiltAngle, -60, 60, 30, 150);
 
   panServo.write(pan);
   tiltServo.write(tilt);
