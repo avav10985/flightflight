@@ -34,20 +34,24 @@ void setup() {
   Serial.flush();
 
   delay(200);
-  Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
-  Serial.flush();
-
+  Serial.printf("[1] WiFi.mode(STA) 前 ...\n");  Serial.flush();
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_2dBm);   // 最低功率
+  Serial.printf("[2] WiFi.mode(STA) 完成\n");    Serial.flush();
+  delay(100);
+
+  Serial.printf("[3] WiFi.begin(%s) 前 ...\n", WIFI_SSID); Serial.flush();
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.printf("[4] WiFi.begin() 已返回,等連線 ...\n"); Serial.flush();
+
+  // begin 返回後再降功率(避免 begin 前呼叫某些 SDK 版本會炸)
+  WiFi.setTxPower(WIFI_POWER_2dBm);
+  Serial.printf("[5] setTxPower(2dBm) 完成\n");  Serial.flush();
 
   unsigned long wt0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wt0 < 20000) {
     delay(500);
-    Serial.print(".");
-    Serial.flush();
+    Serial.printf(". status=%d\n", WiFi.status()); Serial.flush();
   }
-  Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[+] WiFi OK,IP=%s,RSSI=%d dBm\n",
