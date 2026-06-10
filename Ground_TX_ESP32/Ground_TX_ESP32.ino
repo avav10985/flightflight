@@ -505,14 +505,45 @@ void setup() {
   tft.setRotation(2);   // 240×320 portrait 翻 180°
   tft.fillScreen(TFT_BLACK);
   tft.setFont(&fonts::efontTW_16);
+
+  // 開機狀態畫面(因 USB CDC 在 ESP32-S3 有問題,debug 訊息全部上 TFT)
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(5, 5);
-  tft.print("無人機地面站 V2-A");
-  tft.setCursor(5, 28);
-  if (sdOK) tft.print("SD: 已掛載");
-  else      tft.print("SD: 未接(繼續)");
+  tft.print("地面站 V2-A 啟動");
 
-  delay(300);
+  // NRF24 狀態:大字顯示 OK / FAIL,3 秒後才進飛行 UI
+  tft.setCursor(5, 40);
+  tft.setTextColor(nrfOK ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  tft.print("NRF24 begin: ");
+  tft.print(nrfOK ? "OK" : "FAIL");
+
+  tft.setCursor(5, 70);
+  bool chipOK = radio.isChipConnected();
+  tft.setTextColor(chipOK ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  tft.print("chip connected: ");
+  tft.print(chipOK ? "YES" : "NO");
+
+  tft.setCursor(5, 100);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.printf("PIPE = 0x%04X%04X", (uint16_t)(PIPE_OUT >> 16), (uint16_t)PIPE_OUT);
+  tft.setCursor(5, 130);
+  tft.printf("CHAN = %d", NRF_CHANNEL);
+
+  tft.setCursor(5, 170);
+  if (sdOK) {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.print("SD: 已掛載");
+  } else {
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.print("SD: 未接");
+  }
+
+  tft.setCursor(5, 250);
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.print("3 秒後進飛行 UI...");
+
+  delay(3000);
+
   drawFlightStatic();
   Serial.println("地面站 V2-A 就緒");
 }
