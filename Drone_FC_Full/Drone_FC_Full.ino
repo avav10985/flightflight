@@ -504,6 +504,28 @@ void saveCalibration() {
   imuPrefs.end();
 }
 
+// 2026-06-09 手把 paramID 102 觸發:存 PID 5 個值到 NVS
+void savePIDToNVS() {
+  imuPrefs.begin("imu", false);
+  imuPrefs.putFloat("kp_rp", Kp_rp);
+  imuPrefs.putFloat("ki_rp", Ki_rp);
+  imuPrefs.putFloat("kd_rp", Kd_rp);
+  imuPrefs.putFloat("kp_y",  Kp_y);
+  imuPrefs.putFloat("ki_y",  Ki_y);
+  imuPrefs.end();
+}
+
+// 開機時呼叫:從 NVS 讀回 PID,沒存過就用程式預設值
+void loadPIDFromNVS() {
+  imuPrefs.begin("imu", true);
+  Kp_rp = imuPrefs.getFloat("kp_rp", Kp_rp);
+  Ki_rp = imuPrefs.getFloat("ki_rp", Ki_rp);
+  Kd_rp = imuPrefs.getFloat("kd_rp", Kd_rp);
+  Kp_y  = imuPrefs.getFloat("kp_y",  Kp_y);
+  Ki_y  = imuPrefs.getFloat("ki_y",  Ki_y);
+  imuPrefs.end();
+}
+
 void clearCalibration() {
   imuPrefs.begin("imu", false);
   imuPrefs.clear();
@@ -719,12 +741,32 @@ void buildTelemetry() {
 }
 
 void applyCommand() {
+  // 封包 ~50Hz 連發,paramID/paramVal 沒變就不重做(避免 Serial 洗版 + 動作重複觸發)
+  static byte  lastID  = 0;
+  static float lastVal = 0;
+  if (data.paramID == lastID && data.paramVal == lastVal) return;
+  lastID  = data.paramID;
+  lastVal = data.paramVal;
+
   switch (data.paramID) {
     case 1: Kp_rp = data.paramVal; Serial.printf(">> 收到 Kp=%.3f\n", Kp_rp); break;
     case 2: Ki_rp = data.paramVal; Serial.printf(">> 收到 Ki=%.3f\n", Ki_rp); break;
     case 3: Kd_rp = data.paramVal; Serial.printf(">> 收到 Kd=%.3f\n", Kd_rp); break;
     case 4: Kp_y  = data.paramVal; Serial.printf(">> 收到 Kp_y=%.3f\n", Kp_y); break;
     case 5: Ki_y  = data.paramVal; Serial.printf(">> 收到 Ki_y=%.3f\n", Ki_y); break;
+    case 100:
+      Serial.println(">> 手把觸發快速校準");
+      calibrateGyroQuick();
+      break;
+    case 101:
+      Serial.println(">> 手把觸發完整校準");
+      calibrateFull();
+      break;
+    case 102:
+      savePIDToNVS();
+      Serial.printf(">> PID 已存 NVS: Kp=%.3f Ki=%.3f Kd=%.3f KpY=%.3f KiY=%.3f\n",
+                    Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
+      break;
     default: break;
   }
 }
@@ -1257,6 +1299,11 @@ void setup() {
     Serial.println("[!] 磁力計沒偵測到,Mode 02 仍可飛但 yaw 會漂");
   }
 #endif
+
+  // PID 從 NVS 載入(手把調過會留著);沒存過就用程式預設值
+  loadPIDFromNVS();
+  Serial.printf("[*] PID 從 NVS: Kp=%.3f Ki=%.3f Kd=%.3f KpY=%.3f KiY=%.3f\n",
+                Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
 
   // 校準:先試 NVS 載入,沒有再做首次完整校準
   if (loadCalibration()) {

@@ -197,15 +197,20 @@ UiState ui = UI_FLIGHT;
 // PID 本地副本(開機與飛機預設一致)
 // 2026-06-09 跟飛機 Drone_FC_Full(commit fe466f0)同步降到保守值
 // 避免一進選單就送舊高值給飛機 → 飛機 PID 被覆蓋成激進值
-struct Param { const char* name; float val; float step; byte id; };
+// isAction = true → 動作項目(校準/存檔),OK 觸發、不顯示數值
+// 動作項目用 paramVal 當 pulse counter,每按一次 +1,飛機 dedup 看 (id,val) 變化才動作
+struct Param { const char* name; float val; float step; byte id; bool isAction; };
 Param params[] = {
-  { "Kp ", 1.0f,  0.1f,   1 },
-  { "Ki ", 0.01f, 0.005f, 2 },
-  { "Kd ", 0.3f,  0.05f,  3 },
-  { "KpY", 0.8f,  0.1f,   4 },
-  { "KiY", 0.01f, 0.005f, 5 },
+  { "Kp ",      1.0f,  0.1f,   1,   false },
+  { "Ki ",      0.01f, 0.005f, 2,   false },
+  { "Kd ",      0.3f,  0.05f,  3,   false },
+  { "KpY",      0.8f,  0.1f,   4,   false },
+  { "KiY",      0.01f, 0.005f, 5,   false },
+  { "保存PID",  0.0f,  1.0f,   102, true  },
+  { "快速校準",  0.0f,  1.0f,   100, true  },
+  { "完整校準",  0.0f,  1.0f,   101, true  },
 };
-const int N_PARAM = 5;
+const int N_PARAM = 8;
 int menuCursor = 0;
 
 unsigned long lastDrawTime = 0;
@@ -275,12 +280,21 @@ void handleMenuCursor() {
 
 void handleMenuButton(int btn) {
   if (btn == BTN_BACK) { ui = UI_FLIGHT; drawFlightStatic(); return; }
-  if (btn == BTN_PLUS)  params[menuCursor].val += params[menuCursor].step;
-  if (btn == BTN_MINUS) params[menuCursor].val -= params[menuCursor].step;
-  if (params[menuCursor].val < 0) params[menuCursor].val = 0;
-  // +/- /OK → 排好參數，交給主迴圈 write 帶給飛機
-  data.paramID  = params[menuCursor].id;
-  data.paramVal = params[menuCursor].val;
+  Param &p = params[menuCursor];
+  if (p.isAction) {
+    // 動作項目:只認 OK,每按一次 paramVal +1 當 pulse,飛機看 val 變才會做
+    if (btn == BTN_OK) {
+      p.val += 1.0f;
+      data.paramID  = p.id;
+      data.paramVal = p.val;
+    }
+  } else {
+    if (btn == BTN_PLUS)  p.val += p.step;
+    if (btn == BTN_MINUS) p.val -= p.step;
+    if (p.val < 0) p.val = 0;
+    data.paramID  = p.id;
+    data.paramVal = p.val;
+  }
 }
 
 // ============================================================
@@ -427,9 +441,9 @@ void drawMenuStatic() {
 void drawMenuDynamic() {
   // 只重畫狀態變過的列(cursor 跳走 / 值改了),避免閃爍
   static int   lastCursor = -1;
-  static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999 };
+  static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999, -999, -999, -999 };
   char buf[24];
-  const int rowH = 46;     // 直立空間多,每列更高
+  const int rowH = 30;     // 8 列要塞進 240 px,壓低行高
 
   for (int i = 0; i < N_PARAM; i++) {
     bool sel    = (i == menuCursor);
@@ -443,12 +457,16 @@ void drawMenuDynamic() {
       tft.fillRect(0, y, 240, rowH, bg);
       tft.setFont(&fonts::efontTW_24);
       tft.setTextColor(fg, bg);
-      tft.setCursor(10, y + 10);
+      tft.setCursor(10, y + 3);
       tft.print(sel ? ">" : " ");
       tft.print(params[i].name);
-      tft.setCursor(120, y + 10);
-      snprintf(buf, sizeof(buf), "%7.3f", params[i].val);
-      tft.print(buf);
+      tft.setCursor(160, y + 3);
+      if (params[i].isAction) {
+        tft.print("GO");
+      } else {
+        snprintf(buf, sizeof(buf), "%6.3f", params[i].val);
+        tft.print(buf);
+      }
       lastVal[i] = params[i].val;
     }
   }
