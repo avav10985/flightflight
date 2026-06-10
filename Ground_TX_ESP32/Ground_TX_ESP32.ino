@@ -440,6 +440,9 @@ void drawMenuDynamic() {
 // ============================================================
 void setup() {
   Serial.begin(115200);
+  // ESP32-S3 USB CDC 需要時間列舉,沒這個 delay print 會送到沒人接收 → host 看不到
+  delay(2000);
+  Serial.println("\n=== 地面站 V2-A 啟動 ===");
 
   // 關掉 ESP32-S3 板上的 WS2812 RGB LED(常在 GPIO 48,跟我們 TFT CS 共腳)
   // 在 tft.init() 之前送一次「全 0 = 關燈」訊號,之後 GPIO 48 切換成 SPI CS
