@@ -489,10 +489,10 @@ void setup() {
   radio.setAutoAck(true);
   radio.enableAckPayload();
   radio.setDataRate(RF24_250KBPS);
-  // 2026-06-09 從 PA_MAX 降到 PA_HIGH:SD 拔掉後 NRF24 TX 電流尖峰會
-  // 讓手把 3V3 軌 sag → brown-out 重啟 loop。HIGH 比 MAX 少 6dB,
-  // 對短距離(< 50m)沒差,穩定性高很多
-  radio.setPALevel(RF24_PA_HIGH);
+  // 2026-06-09 PA_HIGH 還是讓 3V3 軌 sag(LDO 撐不住 50mA 尖峰)
+  // 降到 PA_MIN(~7mA 尖峰),確認對通邏輯先,距離 ~10m 夠桌面測試
+  // 飛實機要長距離再加大電容 / 加獨立 LDO 後改回 HIGH 或 MAX
+  radio.setPALevel(RF24_PA_MIN);
   radio.stopListening();
   Serial.println("[+] NRF24 就緒");
 

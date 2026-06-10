@@ -1289,8 +1289,8 @@ void setup() {
   radio.setAutoAck(true);          // 雙向必須 true
   radio.enableAckPayload();        // 開啟 ACK 回傳遙測
   radio.setDataRate(RF24_250KBPS);
-  // PA_HIGH(不是 MAX),避免 TX 電流尖峰 brown-out;對短飛行夠用
-  radio.setPALevel(RF24_PA_HIGH);
+  // PA_MIN(2026-06-09):兩邊都用最低,先驗對通邏輯,飛實機加電容後再升 PA
+  radio.setPALevel(RF24_PA_MIN);
   radio.startListening();
   Serial.println("[4] NRF24 listening（雙向 ACK 遙測已開）");
 
