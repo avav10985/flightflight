@@ -143,16 +143,18 @@ struct Signal {
 };
 
 // 飛機 → 手把(NRF24 ACK Payload,**必須跟飛機端 Telemetry struct 完全一致**)
+// 2026-06-09 移除 battery_mV(使用者沒裝),改放 altitude + heading
 struct Telemetry {
   int16_t  roll;        // 角度 ×10
-  int16_t  pitch;
+  int16_t  pitch;       // 角度 ×10
   int16_t  yawRate;     // 角速度 ×10°/s
-  uint16_t battery_mV;
+  int16_t  altitude_dm; // 相對高度 ×10(decimeter,範圍 ±3276.7m)
+  int16_t  heading;     // 機頭方位 ×10(0~3599,0=北 900=東 1800=南 2700=西)
   uint8_t  status;      // 多 bit:見下面 STATUS_*
   uint8_t  satCount;    // GPS 衛星數
   int32_t  lat_e7;      // 緯度 ×10^7
   int32_t  lon_e7;      // 經度 ×10^7
-};   // 18 bytes(NRF24 ACK Payload 上限 32)
+};   // 20 bytes(NRF24 ACK Payload 上限 32)
 
 // status 位元定義(跟飛機端一致)
 #define STATUS_ARMED         0x01   // bit0:已 armed
@@ -376,18 +378,29 @@ void drawFlightDynamic(byte mode) {
   }
   g_flightDirty = false;   // 消耗 dirty 旗標
 
-  // 底部狀態列(兩行)
+  // 底部狀態列(三行,塞 GPS / 高度 / 方位 / 油門 / 連線)
   tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  snprintf(buf, sizeof(buf), "油門 %3d%%   電池 %4.1fV",
+  // 第 1 行:油門 + 高度
+  snprintf(buf, sizeof(buf), "油門%3d%%  高度%+5.1fm",
            (int)(data.throttle * 100 / 255),
-           tele.battery_mV / 1000.0);
-  tft.setCursor(5, 285);
+           tele.altitude_dm / 10.0);
+  tft.setCursor(5, 283);
   tft.print(buf);
-  snprintf(buf, sizeof(buf), "%s  %s",
-           teleOK ? "連線" : "斷線",
-           sdOK ? "SD好" : "無SD");
-  tft.setCursor(5, 302);
+  // 第 2 行:方位 + GPS 衛星數
+  const char* dir = "?";
+  int h10 = tele.heading;
+  if      (h10 >= 3375 || h10 < 225)  dir = "北";
+  else if (h10 <  675)                dir = "東北";
+  else if (h10 < 1125)                dir = "東";
+  else if (h10 < 1575)                dir = "東南";
+  else if (h10 < 2025)                dir = "南";
+  else if (h10 < 2475)                dir = "西南";
+  else if (h10 < 2925)                dir = "西";
+  else                                dir = "西北";
+  snprintf(buf, sizeof(buf), "方位%5.1f° %s  GPS sat%d",
+           tele.heading / 10.0, dir, tele.satCount);
+  tft.setCursor(5, 300);
   tft.print(buf);
 }
 

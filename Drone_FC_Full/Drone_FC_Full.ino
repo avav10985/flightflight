@@ -125,15 +125,17 @@ struct Signal {
 
 // 飛機 → 地面（ACK payload 回傳遙測）
 struct Telemetry {
-  int16_t  roll;        // 角度 ×10
-  int16_t  pitch;
+  int16_t  roll;        // 角度 ×10(deg × 10)
+  int16_t  pitch;       // 角度 ×10
   int16_t  yawRate;     // 角速度 ×10°/s
-  uint16_t battery_mV;  // 電壓 mV
+  int16_t  altitude_dm; // 相對高度 ×10(decimeter,範圍 ±3276.7m)
+  int16_t  heading;     // 機頭絕對方位 ×10(0~3599,0=北 900=東 1800=南 2700=西)
   uint8_t  status;      // 見下面 STATUS_* 位元定義
   uint8_t  satCount;    // GPS 衛星數
   int32_t  lat_e7;      // 緯度 × 10^7
   int32_t  lon_e7;      // 經度 × 10^7
-};   // 18 bytes(NRF24 ACK payload max 32)
+};   // 20 bytes(NRF24 ACK payload max 32)
+// 2026-06-09 移除 battery_mV(使用者沒裝電池分壓),改放 altitude + heading
 
 // Telemetry.status 位元定義
 #define STATUS_ARMED         0x01   // bit0:已 armed
@@ -690,10 +692,19 @@ void readBattery() {
 }
 
 void buildTelemetry() {
-  tele.roll       = (int16_t)(roll * 10);
-  tele.pitch      = (int16_t)(pitch * 10);
-  tele.yawRate    = (int16_t)(yawRate * 10);
-  tele.battery_mV = (uint16_t)(batteryV * 1000);
+  tele.roll        = (int16_t)(roll * 10);
+  tele.pitch       = (int16_t)(pitch * 10);
+  tele.yawRate     = (int16_t)(yawRate * 10);
+#if ENABLE_BMP280
+  tele.altitude_dm = (int16_t)(altitude_m * 10);
+#else
+  tele.altitude_dm = 0;
+#endif
+  // bodyYawEst 0~360,clamp 後 ×10 給 int16_t
+  float h = bodyYawEst;
+  if (h < 0)    h += 360.0f;
+  if (h > 360)  h -= 360.0f;
+  tele.heading     = (int16_t)(h * 10);
 
   uint8_t st = 0;
   if (armed)         st |= STATUS_ARMED;
