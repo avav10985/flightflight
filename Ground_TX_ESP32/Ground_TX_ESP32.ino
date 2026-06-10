@@ -100,8 +100,9 @@ LGFX tft;
 #define PIN_SPI_SCK  38
 #define PIN_SPI_MOSI 39
 #define PIN_SPI_MISO 40
-#define PIN_SD_CS   47   // 真正釋出腳,不用上拉電阻(2026-06-06 從 GPIO 0 改過來)
-                         // SD 模組 VCC 接 5V 軌(模組內含電平轉換 IC 需要 5V 才工作)
+#define PIN_SD_CS   47   // SD CS:ENABLE_SD = 0 時這隻腳不操作,可挪做他用
+                         // 注意:SD 模組内含 level shifter,共 SPI 會搶 bus 拖爆 NRF24,
+                         //       使用時 VCC 接 5V 軌(模組內 IC 需要 5V)
 
 // ====== V2-B 跟其他 feature 旗標(2026-06-06)======
 // 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**
@@ -109,6 +110,8 @@ LGFX tft;
 #define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
 #define ENABLE_MUSIC            0   // 任意 mode 都可放音樂(需 SD + MAX98357A)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
+#define ENABLE_SD               0   // SD 卡模組:0 = 停用(2026-06-09 SD 模組搶 SPI bus 拖爆 NRF24,
+                                    // 飛行測試先拔 SD VCC + 程式跳過 SD init。GPIO 47 釋出)
 #define PIN_I2S_BCLK   11           // V2-B 語音模組腳位(共用 INMP441 + MAX98357A)
 #define PIN_I2S_WS     12
 #define PIN_I2S_DOUT   13           // → MAX98357A DIN
@@ -493,6 +496,7 @@ void setup() {
   radio.stopListening();
   Serial.println("[+] NRF24 就緒");
 
+#if ENABLE_SD
   // SD(選用,沒卡也繼續)
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
@@ -502,6 +506,11 @@ void setup() {
   } else {
     Serial.println("[*] SD 卡未接或初始化失敗(繼續)");
   }
+#else
+  // ENABLE_SD = 0:跳過 SD init,GPIO 47 不操作,留給未來其他用途
+  Serial.println("[*] SD 停用(ENABLE_SD = 0)");
+  sdOK = false;
+#endif
 
   // TFT(SD 之後 init,共用 SPI bus_shared 模式)
   tft.init();
