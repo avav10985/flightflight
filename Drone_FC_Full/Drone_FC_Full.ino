@@ -355,7 +355,7 @@ const char* navStateName(NavState s) {
 
 const float I_LIMIT     = 100.0f;
 // 2026-06-09 從 30° 降到 15°:30° 太激進,輕推搖桿馬達就猛轉
-const float MAX_ANGLE   = 15.0f;
+const float MAX_ANGLE   = 20.0f;
 // 2026-06-09 從 90°/s 降到 45°/s:同樣保守
 const float MAX_YAWRATE = 45.0f;
 
