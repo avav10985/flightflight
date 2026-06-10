@@ -194,14 +194,16 @@ enum { BTN_NONE, BTN_PLUS, BTN_MINUS, BTN_OK, BTN_BACK };
 enum UiState { UI_FLIGHT, UI_MENU };
 UiState ui = UI_FLIGHT;
 
-// PID 本地副本（開機與飛機預設一致）
+// PID 本地副本(開機與飛機預設一致)
+// 2026-06-09 跟飛機 Drone_FC_Full(commit fe466f0)同步降到保守值
+// 避免一進選單就送舊高值給飛機 → 飛機 PID 被覆蓋成激進值
 struct Param { const char* name; float val; float step; byte id; };
 Param params[] = {
-  { "Kp ", 2.0f,  0.1f,   1 },
-  { "Ki ", 0.02f, 0.005f, 2 },
-  { "Kd ", 0.5f,  0.05f,  3 },
-  { "KpY", 1.5f,  0.1f,   4 },
-  { "KiY", 0.02f, 0.005f, 5 },
+  { "Kp ", 1.0f,  0.1f,   1 },
+  { "Ki ", 0.01f, 0.005f, 2 },
+  { "Kd ", 0.3f,  0.05f,  3 },
+  { "KpY", 0.8f,  0.1f,   4 },
+  { "KiY", 0.01f, 0.005f, 5 },
 };
 const int N_PARAM = 5;
 int menuCursor = 0;
