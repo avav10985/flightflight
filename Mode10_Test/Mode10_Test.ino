@@ -269,6 +269,9 @@ void setup() {
 
   Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  // 手把 3V3 LDO 規格不夠,預設 19.5dBm TX 會 brown-out。先降到 8.5dBm。
+  // 桌面距離手機熱點 1~3m 完全夠用,RSSI 大概還 -50dBm。
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long wt0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wt0 < 15000) {
