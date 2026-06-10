@@ -251,9 +251,10 @@ void stopRec() {
 }
 
 void setup() {
-  // 暫時關 brown-out detector(LDO 不夠時測試用,正式版要硬體解掉)
+  // 暫時關 brown-out detector(S3 要清 ENA bit,不能整個 reg 寫 0)
   // 危險:電壓真的掉時不會自動 reset,可能跑出怪行為。穩了之後拿掉。
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  REG_CLR_BIT(RTC_CNTL_BROWN_OUT_REG, RTC_CNTL_BROWN_OUT_INT_ENA);
+  REG_CLR_BIT(RTC_CNTL_BROWN_OUT_REG, RTC_CNTL_BROWN_OUT_ENA);
 
   Serial.begin(115200);
   unsigned long t0 = millis();
