@@ -486,7 +486,10 @@ void setup() {
   radio.setAutoAck(true);
   radio.enableAckPayload();
   radio.setDataRate(RF24_250KBPS);
-  radio.setPALevel(RF24_PA_MAX);
+  // 2026-06-09 從 PA_MAX 降到 PA_HIGH:SD 拔掉後 NRF24 TX 電流尖峰會
+  // 讓手把 3V3 軌 sag → brown-out 重啟 loop。HIGH 比 MAX 少 6dB,
+  // 對短距離(< 50m)沒差,穩定性高很多
+  radio.setPALevel(RF24_PA_HIGH);
   radio.stopListening();
   Serial.println("[+] NRF24 就緒");
 
