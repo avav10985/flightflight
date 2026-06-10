@@ -440,9 +440,13 @@ void drawMenuDynamic() {
 // ============================================================
 void setup() {
   Serial.begin(115200);
-  // ESP32-S3 USB CDC 需要時間列舉,沒這個 delay print 會送到沒人接收 → host 看不到
-  delay(2000);
+  // 等 USB CDC 真的連上(最多 3 秒),沒 host 連接也照樣繼續
+  // 比固定 delay(2000) 可靠:有 Serial Monitor 接著就立刻過,沒接就 3 秒後超時
+  unsigned long t0 = millis();
+  while (!Serial && millis() - t0 < 3000) delay(10);
+  delay(200);   // 額外緩衝,讓 host 端 buffer 準備好
   Serial.println("\n=== 地面站 V2-A 啟動 ===");
+  Serial.flush();
 
   // 關掉 ESP32-S3 板上的 WS2812 RGB LED(常在 GPIO 48,跟我們 TFT CS 共腳)
   // 在 tft.init() 之前送一次「全 0 = 關燈」訊號,之後 GPIO 48 切換成 SPI CS
