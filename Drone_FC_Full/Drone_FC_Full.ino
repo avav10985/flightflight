@@ -1272,7 +1272,18 @@ void setup() {
 
   pinMode(PIN_BAT_ADC, INPUT);
 
-  radio.begin();
+  Serial.print("[3.5] NRF24 radio.begin() ... ");
+  bool nrfOK = radio.begin();
+  Serial.println(nrfOK ? "OK" : "FAIL");
+  Serial.printf("[3.5] NRF24 chip connected: %s\n",
+                radio.isChipConnected() ? "YES" : "NO ⚠️ 模組沒回應 SPI");
+  if (!nrfOK || !radio.isChipConnected()) {
+    Serial.println("[!] NRF24 init 失敗,通常是:");
+    Serial.println("    1. 100µF 電容沒焊 / 焊接點冷焊");
+    Serial.println("    2. CE/CSN/SCK/MISO/MOSI 接線錯");
+    Serial.println("    3. NRF24 模組壞了");
+    Serial.println("    4. 3V3 軌電壓不夠(量量看)");
+  }
   radio.openReadingPipe(1, PIPE_IN);
   radio.setChannel(NRF_CHANNEL);
   radio.setAutoAck(true);          // 雙向必須 true
