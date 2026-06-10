@@ -20,6 +20,8 @@
 #include <driver/i2s_std.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 #include "secrets.h"
 
 #define PIN_I2S_BCLK     11
@@ -249,11 +251,16 @@ void stopRec() {
 }
 
 void setup() {
+  // 暫時關 brown-out detector(LDO 不夠時測試用,正式版要硬體解掉)
+  // 危險:電壓真的掉時不會自動 reset,可能跑出怪行為。穩了之後拿掉。
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 3000) delay(10);
   delay(200);
   Serial.println("\n=== Mode10_Test Phase 2:錄音 + Groq Whisper ===");
+  Serial.println("⚠ brown-out 偵測已關(暫時),硬體穩定後要拿掉");
 
   pinMode(PIN_SHOULDER_L, INPUT_PULLUP);
 
@@ -269,9 +276,9 @@ void setup() {
 
   Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  // 手把 3V3 LDO 規格不夠,預設 19.5dBm TX 會 brown-out。先降到 8.5dBm。
-  // 桌面距離手機熱點 1~3m 完全夠用,RSSI 大概還 -50dBm。
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  // 手把 3V3 LDO 規格不夠,降到 2dBm(最低)避免 brown-out。
+  // 桌面距離手機熱點 1~3m 完全夠用,RSSI 大概還 -65dBm。
+  WiFi.setTxPower(WIFI_POWER_2dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long wt0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wt0 < 15000) {
