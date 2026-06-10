@@ -364,6 +364,7 @@ void drawFlightDynamic(byte mode) {
       tft.setCursor(40, 175); tft.print("未實作");
     }
     lastBlock = block;
+    g_flightDirty = true;   // 主體被清過,下面值檢查強制重畫(否則 tele 沒變就空白)
   }
 
   // === 姿態數值:只在改變時重畫 ===
