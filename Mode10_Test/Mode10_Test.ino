@@ -111,7 +111,7 @@ void tftHint(const char* text) {
 // Google Gemini API(語音直送 → JSON 指令,一次完成 STT + 解析)
 #define GEMINI_HOST     "generativelanguage.googleapis.com"
 #define GEMINI_PORT     443
-#define GEMINI_MODEL    "gemini-2.0-flash"
+#define GEMINI_MODEL    "gemini-2.0-flash-lite"   // Lite 版 30 RPM 限額,比 flash 多一倍
 
 // Gemini prompt(直接吃 audio 然後回 JSON 含 transcript + action)
 #define GEMINI_PROMPT "你是無人機語音指令解析器。聽下面這段中文語音,回傳 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)、unknown(聽不懂)。格式:{\\\"transcript\\\":\\\"<聽到的中文>\\\",\\\"action\\\":\\\"<動作>\\\"}。範例:聽到起飛→{\\\"transcript\\\":\\\"起飛\\\",\\\"action\\\":\\\"takeoff\\\"};聽到向前飛三秒→{\\\"transcript\\\":\\\"向前飛三秒\\\",\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3};聽到切到 GPS 模式→{\\\"transcript\\\":\\\"切到 GPS 模式\\\",\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}。只回 JSON。"
