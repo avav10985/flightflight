@@ -490,7 +490,7 @@ void setup() {
   Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
   tftStatus("WiFi 連線中...", TFT_YELLOW);
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_2dBm);
+  // 新 Freenove + LD1117 雙軌架構,LDO 餘裕足,不再壓 2dBm。預設 19.5dBm 確保連線穩定
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long wt0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wt0 < 15000) {
