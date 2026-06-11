@@ -28,6 +28,7 @@
 #define PIN_I2S_BCLK     11
 #define PIN_I2S_WS       12
 #define PIN_I2S_DIN      14
+#define PIN_AMP_SD       18    // MAX98357A SD(shutdown):LOW=靜音,HIGH=啟用
 #define PIN_SHOULDER_L    8
 
 // ====== TFT(沿用 Ground_TX_ESP32 配置)======
@@ -524,6 +525,11 @@ void setup() {
   tft.setCursor(20, 12);
   tft.print("Mode 10 語音");
   tftStatus("開機中...", TFT_YELLOW);
+
+  // 立刻把 MAX98357A 拉 LOW(shutdown)避免開機/I2S 啟動時放大雜訊
+  // Phase 5 接 TTS 才會在播放前拉 HIGH、播完拉回 LOW
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, LOW);
 
   pinMode(PIN_SHOULDER_L, INPUT_PULLUP);
 
