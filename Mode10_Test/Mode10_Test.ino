@@ -640,10 +640,20 @@ void stopRec() {
   Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
   tftTranscript(text.c_str());
 
+  // 清掉 Whisper 常加的標點 / 空白,避免 Llama 認不出來
+  String cleanText = text;
+  cleanText.trim();
+  // 移除常見中英文標點
+  String punct = "。,!?,.!?;:、 \"'";
+  while (cleanText.length() > 0 && punct.indexOf(cleanText[cleanText.length()-1]) >= 0) {
+    cleanText.remove(cleanText.length() - 1);
+  }
+  Serial.printf("[STT] 清理後「%s」\n", cleanText.c_str());
+
   // Phase 3:Groq Llama 解析
   tftStatus("解析中...", TFT_YELLOW);
   unsigned long t2 = millis();
-  String llmJson = parseCommandWithLlama(text);
+  String llmJson = parseCommandWithLlama(cleanText);
   unsigned long t3 = millis() - t2;
   if (llmJson.length() == 0) {
     char ebuf[64];
@@ -657,8 +667,16 @@ void stopRec() {
   String action = extractAction(llmJson);
   char buf[64];
   snprintf(buf, sizeof(buf), "→ %s", action.c_str());
-  tftStatus(buf, TFT_GREEN);
-  tftHint("按肩鈕說下一句");
+  tftStatus(buf, (action == "unknown") ? TFT_ORANGE : TFT_GREEN);
+  // unknown 時 hint 印 Llama 回來的真實 JSON,直接看哪邊出問題
+  if (action == "unknown") {
+    // 截斷太長的 JSON,只顯示前 40 字
+    String shortJson = llmJson;
+    if (shortJson.length() > 40) shortJson = shortJson.substring(0, 40);
+    tftHint(shortJson.c_str());
+  } else {
+    tftHint("按肩鈕說下一句");
+  }
 }
 
 void setup() {
