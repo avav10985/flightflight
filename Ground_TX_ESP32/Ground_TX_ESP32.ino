@@ -116,6 +116,8 @@ LGFX tft;
 #define ENABLE_PC_MODE11        0   // Mode 11:PC 透過 USB Serial 控制飛機(透明橋接)
 #define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
 #define ENABLE_MUSIC            1   // 任意 mode 都可放音樂(需 SD + MAX98357A,2026-06-12 開)
+#define ENABLE_VIDEO_MODE20     1   // Mode 20:媒體模式,SD /video/*.mjp 影片播放
+                                    // (需 ENABLE_MUSIC=1 共用 I²S + JPEGDEC 函式庫)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
 #define ENABLE_SD               1   // SD 卡模組:1 = 啟用(2026-06-11 新電源架構後重測。
                                     // 2026-06-09 曾因模組 level shifter 搶 SPI bus 拖爆 NRF24 停用;
@@ -126,6 +128,16 @@ LGFX tft;
 #define PIN_I2S_DIN    14           // INMP441 SD →
 #define PIN_AMP_SD     18           // MAX98357A SD(shutdown):LOW=休眠靜音、HIGH=啟用
                                     // 預設拉低消除「沙沙」雜訊,Mode 10 / 音樂 要播放時設 HIGH
+
+#if ENABLE_VIDEO_MODE20
+#include <JPEGDEC.h>                // Library Manager 搜 JPEGDEC(Larry Bank)
+#if !ENABLE_MUSIC
+#error "ENABLE_VIDEO_MODE20 需要 ENABLE_MUSIC=1(共用 I2S TX 通道)"
+#endif
+void enterVideoMode();
+void exitVideoMode();
+void videoModeLoop(int btnEdge);
+#endif
 
 // ---- 方向反轉（測試後不對就改）----
 const bool REV_THROTTLE = true;
@@ -635,6 +647,24 @@ void loop() {
   bool btnEdge = (btn != lastBtn && btn != BTN_NONE);
   lastBtn = btn;
 
+#if ENABLE_VIDEO_MODE20
+  // Mode 20 媒體模式:接管整個 loop。NRF24 照送(mode=20 → 飛機白名單
+  // 擋掉自動 disarm),模式開關一撥走立刻退出
+  static bool inVideoMode = false;
+  if (mode == 20) {
+    if (!inVideoMode) { inVideoMode = true; enterVideoMode(); }
+    videoModeLoop(btnEdge ? btn : BTN_NONE);
+    readInputs(mode);                       // data.mode = 20
+    radio.write(&data, sizeof(Signal));
+    return;
+  } else if (inVideoMode) {
+    inVideoMode = false;
+    exitVideoMode();
+    ui = UI_FLIGHT;
+    drawFlightStatic();
+  }
+#endif
+
   // UI 狀態機
   if (ui == UI_FLIGHT) {
     if (btnEdge && mode == 0 && btn == BTN_OK) {
@@ -941,6 +971,203 @@ int musicListFiles(String list[], int maxN) {
   return n;
 }
 #endif
+
+
+// ============================================================
+// Mode 20:媒體模式(SD 影片播放,Video_Test 2026-06-12 移植)
+//
+// 檔案:/video/*.mjp(MJPEG)+ 同名 .wav 聲音(可無 → 無聲播放)
+// 轉檔:ffmpeg -i in.mp4 -vf "scale=240:320:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=15" -q:v 8 -f mjpeg xxx.mjp
+//       ffmpeg -i in.mp4 -ar 32000 -ac 1 -sample_fmt s16 xxx.wav
+// 操作:右搖桿選檔 → OK 播放 → 返回/OK 停止 → 模式開關撥走立刻退出
+// 同步:聲音當時鐘,解碼落後 >2 幀跳幀
+// ============================================================
+#if ENABLE_VIDEO_MODE20
+#define VID_FPS        15.0f
+#define VID_FRAME_MAX  (160 * 1024)
+#define VID_MAX_FILES  8
+
+JPEGDEC  vidJpeg;
+File     vidFile, vidAud;
+uint8_t* vidFrameBuf  = nullptr;
+bool     vidPlaying   = false;
+bool     vidHasAudio  = false;
+uint64_t vidAudioFed  = 0;
+uint32_t vidFrameShown = 0;
+unsigned long vidStartMs = 0;
+String   vidList[VID_MAX_FILES];
+int      vidCount  = 0;
+int      vidCursor = 0;
+
+int vidJpegDraw(JPEGDRAW* d) {
+  tft.pushImage(d->x, d->y, d->iWidth, d->iHeight, (uint16_t*)d->pPixels);
+  return 1;
+}
+
+void vidScanFiles() {
+  vidCount = 0;
+  File dir = SD.open("/video");
+  if (!dir) return;
+  while (vidCount < VID_MAX_FILES) {
+    File f = dir.openNextFile();
+    if (!f) break;
+    String name = f.name();
+    if (name.endsWith(".mjp") || name.endsWith(".MJP")) vidList[vidCount++] = name;
+    f.close();
+  }
+  dir.close();
+}
+
+void drawVideoMenu() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 240, 32, TFT_NAVY);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setCursor(30, 4);
+  tft.print("Mode 20 媒體");
+  if (vidCount == 0) {
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.setCursor(10, 100);
+    tft.print("SD /video/ 沒有 .mjp");
+    return;
+  }
+  for (int i = 0; i < vidCount; i++) {
+    bool sel = (i == vidCursor);
+    int y = 44 + i * 30;
+    tft.fillRect(0, y, 240, 30, sel ? TFT_DARKGREEN : TFT_BLACK);
+    tft.setTextColor(sel ? TFT_YELLOW : TFT_WHITE, sel ? TFT_DARKGREEN : TFT_BLACK);
+    tft.setCursor(10, y + 3);
+    tft.print(sel ? ">" : " ");
+    tft.print(vidList[i]);
+  }
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(5, 290);
+  tft.print("搖桿:選  OK:播  切模式:離開");
+}
+
+void vidStop() {
+  if (vidFile) vidFile.close();
+  if (vidAud)  vidAud.close();
+  vidPlaying = false;
+  digitalWrite(PIN_AMP_SD, LOW);
+}
+
+void vidStart(const String& name) {
+  vidStop();
+  String base = String("/video/") + name;
+  vidFile = SD.open(base, FILE_READ);
+  if (!vidFile) return;
+  String wav = base;                       // 同名 .wav 當聲音
+  wav.replace(".mjp", ".wav");
+  wav.replace(".MJP", ".WAV");
+  vidAud = SD.open(wav, FILE_READ);
+  vidHasAudio = (bool)vidAud;
+  if (vidHasAudio) { vidAud.seek(44); digitalWrite(PIN_AMP_SD, HIGH); }
+  vidAudioFed   = 0;
+  vidFrameShown = 0;
+  vidStartMs    = millis();
+  vidPlaying    = true;
+  tft.fillScreen(TFT_BLACK);
+}
+
+void vidFeedAudio() {
+  if (!vidHasAudio) return;
+  static uint8_t pcm[512];
+  static int32_t txb[256];
+  for (int round = 0; round < 16; round++) {
+    int n = vidAud.read(pcm, sizeof(pcm));
+    if (n <= 0) {
+      // 聲音先播完:把時鐘無縫切到 millis 繼續推影像
+      vidHasAudio = false;
+      vidStartMs  = millis() - (unsigned long)((vidAudioFed / (float)(MUSIC_SAMPLE_RATE * 2)) * 1000);
+      vidAudioFed = 0;
+      return;
+    }
+    int samples = n / 2;
+    int16_t* s = (int16_t*)pcm;
+    for (int i = 0; i < samples; i++)
+      txb[i] = ((int32_t)(s[i] * musicVolume / 100)) << 16;
+    size_t written = 0;
+    i2s_channel_write(musicTx, txb, samples * 4, &written, 0);
+    size_t used = written / 2;
+    vidAudioFed += used;
+    if ((int)used < n) { vidAud.seek(vidAud.position() - (n - used)); return; }
+  }
+}
+
+size_t vidReadFrame() {
+  static uint8_t chunk[1024];
+  int len = 0, prev = -1;
+  bool inFrame = false;
+  while (true) {
+    int n = vidFile.read(chunk, sizeof(chunk));
+    if (n <= 0) return 0;
+    for (int i = 0; i < n; i++) {
+      int c = chunk[i];
+      if (!inFrame) {
+        if (prev == 0xFF && c == 0xD8) { inFrame = true; vidFrameBuf[0] = 0xFF; vidFrameBuf[1] = 0xD8; len = 2; }
+        prev = c;
+        continue;
+      }
+      if (len < VID_FRAME_MAX) vidFrameBuf[len++] = (uint8_t)c;
+      if (prev == 0xFF && c == 0xD9) { vidFile.seek(vidFile.position() - (n - i - 1)); return len; }
+      prev = c;
+    }
+  }
+}
+
+void vidUpdate() {
+  vidFeedAudio();
+  uint32_t target = vidHasAudio
+      ? (uint32_t)((vidAudioFed / (float)(MUSIC_SAMPLE_RATE * 2)) * VID_FPS)
+      : (uint32_t)((millis() - vidStartMs) / 1000.0f * VID_FPS);
+  if (vidFrameShown >= target) return;
+  size_t len = vidReadFrame();
+  if (len == 0) { vidStop(); drawVideoMenu(); return; }   // 播完回選單
+  vidFrameShown++;
+  if (target - vidFrameShown > 2) return;                  // 跳幀追時鐘
+  if (vidJpeg.openRAM(vidFrameBuf, len, vidJpegDraw)) {
+    int xoff = (240 - vidJpeg.getWidth())  / 2;
+    int yoff = (320 - vidJpeg.getHeight()) / 2;
+    if (xoff < 0) xoff = 0;
+    if (yoff < 0) yoff = 0;
+    vidJpeg.decode(xoff, yoff, 0);
+    vidJpeg.close();
+  }
+}
+
+void enterVideoMode() {
+#if ENABLE_MUSIC
+  musicStop();   // 影片聲音跟背景音樂共用 I²S,先停音樂
+#endif
+  if (!vidFrameBuf)
+    vidFrameBuf = (uint8_t*)heap_caps_malloc(VID_FRAME_MAX, MALLOC_CAP_SPIRAM);
+  vidCursor = 0;
+  vidScanFiles();
+  drawVideoMenu();
+}
+
+void exitVideoMode() {
+  vidStop();
+}
+
+void videoModeLoop(int btnEdge) {
+  if (vidPlaying) {
+    if (btnEdge == BTN_BACK || btnEdge == BTN_OK) { vidStop(); drawVideoMenu(); return; }
+    vidUpdate();
+    return;
+  }
+  // 選單瀏覽
+  static unsigned long lastMove = 0;
+  if (vidCount > 0 && millis() - lastMove > 250) {
+    int p = centerMap(analogRead(J_PITCH), REV_PITCH);
+    if (p > 240) { vidCursor = (vidCursor + 1) % vidCount;            drawVideoMenu(); lastMove = millis(); }
+    if (p < 15)  { vidCursor = (vidCursor - 1 + vidCount) % vidCount; drawVideoMenu(); lastMove = millis(); }
+  }
+  if (btnEdge == BTN_OK && vidCount > 0) vidStart(vidList[vidCursor]);
+}
+#endif  // ENABLE_VIDEO_MODE20
 
 
 // ============================================================
