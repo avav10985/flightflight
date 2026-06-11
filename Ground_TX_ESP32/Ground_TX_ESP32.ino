@@ -604,7 +604,10 @@ void setup() {
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
   spiSD.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  if (SD.begin(PIN_SD_CS, spiSD)) {
+  // 20MHz 餵影片才夠(4MHz 只有 ~400KB/s 會卡),掛不上自動降速
+  if (SD.begin(PIN_SD_CS, spiSD, 20000000) ||
+      SD.begin(PIN_SD_CS, spiSD, 10000000) ||
+      SD.begin(PIN_SD_CS, spiSD, 4000000)) {
     sdOK = true;
     Serial.println("[+] SD 卡掛載成功(獨立 SPI3)");
   } else {
@@ -1071,7 +1074,7 @@ int musicListFiles(String list[], int maxN) {
 #if ENABLE_VIDEO_MODE12
 #define VID_FPS        15.0f
 #define VID_FRAME_MAX  (160 * 1024)
-#define VID_MAX_FILES  8
+#define VID_MAX_FILES  16
 
 JPEGDEC  vidJpeg;
 File     vidFile, vidAud;
@@ -1085,6 +1088,7 @@ String   vidList[VID_MAX_FILES];
 bool     vidIsVideo[VID_MAX_FILES];   // true=/video/*.mjp,false=/music/*.wav
 int      vidCount  = 0;
 int      vidCursor = 0;
+int      vidScroll = 0;   // 清單捲動視窗起點(一頁 7 列)
 bool     mediaPaused = false;
 unsigned long vidPauseStart = 0;
 
@@ -1140,15 +1144,27 @@ void drawVideoMenu() {
     tft.print("SD /video /music 都空");
     return;
   }
-  for (int i = 0; i < vidCount; i++) {
+  // 捲動視窗:一頁 7 列,游標超出視窗就捲
+  const int VIS = 7;
+  if (vidCursor < vidScroll)           vidScroll = vidCursor;
+  if (vidCursor >= vidScroll + VIS)    vidScroll = vidCursor - VIS + 1;
+  for (int r = 0; r < VIS && vidScroll + r < vidCount; r++) {
+    int i = vidScroll + r;
     bool sel = (i == vidCursor);
-    int y = 44 + i * 30;
+    int y = 44 + r * 30;
     tft.fillRect(0, y, 240, 30, sel ? TFT_DARKGREEN : TFT_BLACK);
     tft.setTextColor(sel ? TFT_YELLOW : TFT_WHITE, sel ? TFT_DARKGREEN : TFT_BLACK);
     tft.setCursor(10, y + 3);
     tft.print(sel ? ">" : " ");
     tft.print(vidIsVideo[i] ? "[影]" : "[樂]");
     tft.print(vidList[i]);
+  }
+  // 超過一頁的提示
+  if (vidCount > VIS) {
+    tft.setFont(&fonts::efontTW_14);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.setCursor(200, 260);
+    tft.printf("%d/%d", vidCursor + 1, vidCount);
   }
   tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -1292,6 +1308,7 @@ void enterVideoMode() {
   tft.setSwapBytes(true);    // JPEGDEC 輸出 RGB565 little-endian,
                              // 沒這行畫面變紅綠雜訊(2026-06-12 實測)
   vidCursor = 0;
+  vidScroll = 0;
   vidScanFiles();
   drawVideoMenu();
 }
