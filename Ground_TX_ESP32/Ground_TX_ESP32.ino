@@ -140,6 +140,7 @@ void videoModeLoop(int btnEdge);
 #endif
 
 #if ENABLE_VOICE_MODE10
+#include <esp_task_wdt.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include "secrets.h"                // WIFI_SSID / WIFI_PASS / GROQ_API_KEY(gitignore 擋住)
@@ -631,6 +632,10 @@ void setup() {
 
 #if ENABLE_VOICE_MODE10
   // 錄音緩衝(PSRAM)+ 語音管線 task 釘在核心 0(主迴圈在核心 1)
+  // 關閉 task watchdog:語音 task 的 TLS 加密/上傳即使逐塊讓出 CPU,
+  // 仍可能讓核心 0 IDLE 超過 5 秒沒跑滿觸發重啟(2026-06-12 兩度實測)。
+  // 手把非飛行安全件,關掉換穩定;之後 ESP-SR 本地辨識取代雲端就能開回來。
+  esp_task_wdt_deinit();
   vRecBuf = (int16_t*)heap_caps_malloc(VREC_MAXSAMP * 2, MALLOC_CAP_SPIRAM);
   if (vRecBuf) {
     xTaskCreatePinnedToCore(voiceTask, "voice", 16384, NULL, 1, NULL, 0);
