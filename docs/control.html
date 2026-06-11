@@ -14,7 +14,7 @@
   <a href="hardware.html">硬體設計</a>
   <a href="control.html" class="active">飛控與校準</a>
   <a href="voice.html">語音子系統</a>
-  <a href="testing.html">測試與驗證</a>
+  <a href="testing.html">作品展示</a>
 </nav>
 
 <div class="page-head">
@@ -57,6 +57,13 @@
   <div class="formula">roll&#8320;  = 0.98 × (roll  + gyro_roll × dt) + 0.02 × acc_roll
 pitch&#8320; = 0.98 × (pitch + gyro_pitch × dt) + 0.02 × acc_pitch</div>
   <p>係數 0.98 / 0.02 之物理意義:陀螺積分主導瞬時響應(高通),加速度計以約 1–2 秒時間常數緩慢拉回絕對基準(低通),振動雜訊被平均掉。偏航軸無重力參考,採相同結構但以<b>磁力計絕對航向</b>作為 2% 修正源;無磁力計時退化為純積分模式(可飛但航向緩慢漂移)。</p>
+
+  <h3>C.2.1 實作程式碼(節錄自 Drone_FC_Full.ino)</h3>
+  <div class="codeblock"><span class="cm">// 每迴圈執行:gRoll/gPitch 為陀螺角速度(°/s),accRoll/accPitch 為
+// 加速度計反推的絕對角度。dt 為與上一迴圈的實際時間差(秒)。</span>
+roll  = 0.98f * (roll  + gRoll  * dt) + 0.02f * accRoll;
+pitch = 0.98f * (pitch + gPitch * dt) + 0.02f * accPitch;</div>
+  <div class="code-note"><b>說明:</b>第一項「上次角度 + 陀螺角速度 × dt」是積分推算的新角度(反應快、會漂移);第二項是加速度計算出的絕對角度(不漂移、但有振動雜訊)。以 98:2 加權後,兩者缺點互相抵銷。</div>
 </section>
 
 <!-- ============ C.3 PID 控制 ============ -->
@@ -72,6 +79,19 @@ M1(前左 CW)  = T + pitchOut + rollOut − yawOut      // 混控
 M2(前右 CCW) = T + pitchOut − rollOut + yawOut
 M3(後左 CCW) = T − pitchOut + rollOut + yawOut
 M4(後右 CW)  = T − pitchOut − rollOut − yawOut      // 各輸出限幅 [1000, 2000]</div>
+
+  <h3>C.3.1.1 實作程式碼(節錄自 Drone_FC_Full.ino)</h3>
+  <div class="codeblock"><span class="cm">// 搖桿(0~255,中位 127)線性映射為目標角度,MAX_ANGLE = 20°</span>
+float rollSet  = (data.roll  - 127) * (MAX_ANGLE / 127.0f);
+float pitchSet = (data.pitch - 127) * (MAX_ANGLE / 127.0f);
+
+<span class="cm">// X 型混控:油門為基準,三軸 PID 修正量依馬達位置與旋向疊加</span>
+int m1 = baseT + pitchOut + rollOut - yawOut;   <span class="cm">// 前左 CW</span>
+int m2 = baseT + pitchOut - rollOut + yawOut;   <span class="cm">// 前右 CCW</span>
+int m3 = baseT - pitchOut + rollOut + yawOut;   <span class="cm">// 後左 CCW</span>
+int m4 = baseT - pitchOut - rollOut - yawOut;   <span class="cm">// 後右 CW</span>
+m1 = constrain(m1, 1000, 2000);  <span class="cm">// 限幅,其餘三顆同</span></div>
+  <div class="code-note"><b>說明:</b>想前傾(pitch)時前排馬達減速、後排加速;想右滾(roll)時左排加速、右排減速;偏航(yaw)靠對角線馬達轉速差產生的反扭矩 —— 正負號完全由各馬達的位置與螺旋槳旋向決定。</div>
 
   <h3>C.3.2 調參歷程</h3>
   <p>PID 增益經三輪實飛迭代,過程記錄如下 —— 這是全專案<b>耗時最多的調試項目之一</b>:</p>

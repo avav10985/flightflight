@@ -14,7 +14,7 @@
   <a href="hardware.html" class="active">硬體設計</a>
   <a href="control.html">飛控與校準</a>
   <a href="voice.html">語音子系統</a>
-  <a href="testing.html">測試與驗證</a>
+  <a href="testing.html">作品展示</a>
 </nav>
 
 <div class="page-head">
@@ -22,6 +22,30 @@
   <h1>硬體設計</h1>
   <div class="desc">電源架構與腳位配置</div>
 </div>
+
+<section>
+  <h2><span class="no">B.0</span>材料選擇與組裝方式</h2>
+
+  <h3>B.0.1 主要材料與選型理由</h3>
+  <div class="table-scroll"><table>
+    <tr><th>材料</th><th>用途</th><th>選型理由</th></tr>
+    <tr><td>ESP32 / ESP32-S3 開發板</td><td>飛控 / 地面站主控</td><td>雙核心 240 MHz 足以同時跑控制迴圈與通訊;內建 WiFi 支援語音與影像功能;S3 之 8 MB PSRAM 容納語音錄音緩衝。<b>教訓:S3 板須選板載 1 A 穩壓器之型號</b>(問題 I-01)</td></tr>
+    <tr><td>MPU-6050 模組</td><td>姿態量測</td><td>六軸一體、I²C 介面、資源豐富,適合自寫姿態解算入門</td></tr>
+    <tr><td>nRF24L01+ 模組</td><td>控制鏈路</td><td>相較 WiFi:延遲低且固定、協定簡單、支援 ACK payload 雙向傳輸,適合 50 Hz 即時控制</td></tr>
+    <tr><td>空心杯馬達 + MOSFET</td><td>動力</td><td>小型機架重量輕,空心杯免電調(ESC),以 MOSFET PWM 直驅降低成本與複雜度</td></tr>
+    <tr><td>2.4" ILI9341 TFT(SPI)</td><td>地面站顯示</td><td>SPI 介面僅需 6 隻 GPIO(並列式需 13+);LovyanGFX 支援中文字型</td></tr>
+    <tr><td>INMP441 / MAX98357A</td><td>語音輸入 / 輸出</td><td>全數位 I²S 介面,避開板上類比雜訊;兩者可共用時脈線省腳位</td></tr>
+    <tr><td>LD1117 穩壓器 + 100 µF</td><td>周邊獨立電源軌</td><td>1 A 容量、低壓差;與板載穩壓器分軌隔離射頻電流尖峰(§B.1)</td></tr>
+  </table></div>
+
+  <h3>B.0.2 組裝方式</h3>
+  <ul>
+    <li><b>飛機</b>:輕量機架,飛控板、感測器與馬達驅動以洞洞板焊接整合;感測器統一掛載於 I²C 匯流排減少佈線。</li>
+    <li><b>地面站(三板架構)</b>:A 板(ESP32-S3 主控)、B 板(TFT 螢幕,4–7 條副排線連接)、C 板(被動元件樞紐 —— 全部分壓電阻與肩鍵集中,主板佈線單純化)。搖桿、開關、按鈕安裝於面板,訊號線匯入 C 板。</li>
+    <li><b>佈線迭代</b>:接線設計以文件(接線總表)先行、實作驗證後回寫修正,共迭代十餘版;GPIO 配置曾為佈線整齊度而對調(左右搖桿訊號各自集中同側)。</li>
+    <li><b>設計圖產生方式</b>:電路 / 接線 / 板面配置圖均以 Python 腳本程式化產生 —— 改一條線即重跑腳本,確保圖面與實體同步。</li>
+  </ul>
+</section>
 
 <section>
   <h2><span class="no">B.1</span>地面站電源架構</h2>

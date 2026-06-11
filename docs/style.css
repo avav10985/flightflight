@@ -153,6 +153,37 @@ header.cover .meta b { color: var(--text); display: block; font-size: 14.5px; fo
 }
 .refs a { color: var(--accent); text-decoration: none; }
 .refs a:hover { text-decoration: underline; }
+/* ===== 程式碼區塊 ===== */
+.codeblock {
+  background: #11161d; border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px 20px; margin: 14px 0;
+  font-family: Consolas, "Courier New", monospace; font-size: 13.5px;
+  overflow-x: auto; white-space: pre; line-height: 1.8; color: #cfe3ff;
+}
+.codeblock .cm { color: #6f8499; }
+.codeblock .kw { color: #ff9e64; }
+.codeblock .fn { color: #7ee2a8; }
+.code-note {
+  background: var(--bg2); border-left: 3px solid var(--green);
+  border-radius: 0 8px 8px 0; padding: 10px 18px; margin: -6px 0 18px;
+  font-size: 14px; color: var(--dim);
+}
+/* ===== 媒體展示 ===== */
+.media-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px; margin: 16px 0;
+}
+.media-grid figure {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden;
+}
+.media-grid img, .media-grid video { width: 100%; display: block; background: #000; }
+.media-grid figcaption { padding: 10px 14px; font-size: 13.5px; color: var(--dim); text-align: center; }
+.media-placeholder {
+  border: 2px dashed var(--line); border-radius: 12px; padding: 36px 20px;
+  text-align: center; color: var(--dim); font-size: 14px; margin: 16px 0;
+}
+.cite { color: var(--accent); text-decoration: none; font-size: 12px; vertical-align: super; }
 /* ===== 上下頁 ===== */
 .pager {
   max-width: 1020px; margin: 40px auto 0; padding: 0 24px;

@@ -14,18 +14,27 @@
   <a href="hardware.html">硬體設計</a>
   <a href="control.html">飛控與校準</a>
   <a href="voice.html">語音子系統</a>
-  <a href="testing.html" class="active">測試與驗證</a>
+  <a href="testing.html" class="active">作品展示</a>
 </nav>
 
 <div class="page-head">
   <div class="crumb">CHAPTER E</div>
-  <h1>測試與驗證</h1>
-  <div class="desc">問題解決紀錄、未來工作與參考資料</div>
+  <h1>作品展示與驗證</h1>
+  <div class="desc">實機展示、發現與分析、應用價值與參考資料</div>
 </div>
 
 <section>
-  <h2><span class="no">E.1</span>問題解決紀錄</h2>
-  <p>下表彙整開發期間之系統級問題、根因分析方法與處置結果。多數問題之定位採<b>對照實驗法</b>:固定其餘變因、單獨替換疑似元件,以重現性確認根因。</p>
+  <h2><span class="no">E.1</span>實機展示</h2>
+  <p>實際飛行測試、地面站操作與語音控制之照片與影片紀錄。</p>
+  <!-- 媒體檔案放 docs/media/,在下方 media-grid 加 figure 即可:
+       <figure><img src="media/檔名.jpg" alt="說明"><figcaption>說明文字</figcaption></figure>
+       <figure><video src="media/檔名.mp4" controls></video><figcaption>說明文字</figcaption></figure> -->
+  <div class="media-placeholder">📷 照片與影片整理中</div>
+</section>
+
+<section>
+  <h2><span class="no">E.2</span>發現與分析</h2>
+  <p>下表彙整開發期間之系統級問題、根因分析方法與處置結果。多數問題之定位採<b>對照實驗法</b>:固定其餘變因、單獨替換疑似元件,以重現性確認根因 —— 這些「單獨都正常、合在一起就失效」的系統級問題,是本專案最重要的工程收穫。</p>
   <div class="table-scroll"><table>
     <tr><th>編號</th><th>問題現象</th><th>根因分析</th><th>處置</th><th>狀態</th></tr>
     <tr>
@@ -88,7 +97,18 @@
 </section>
 
 <section>
-  <h2><span class="no">E.2</span>未來工作</h2>
+  <h2><span class="no">E.3</span>作品應用價值</h2>
+  <div class="table-scroll"><table>
+    <tr><th>領域</th><th>應用方式</th></tr>
+    <tr><td><b>教育示範</b></td><td>飛控、通訊、感測融合、AI 整合全部開源且模組化,每個子系統有獨立測試程式,適合作為嵌入式 / 控制理論之教學平台 —— 學習者可從單一感測器開始逐層理解到完整閉環</td></tr>
+    <tr><td><b>無障礙操控</b></td><td>語音控制(Mode 10)使行動不便或無法操作雙搖桿之使用者亦能指揮飛行器,「起飛 / 向前 / 降落」之口語介面大幅降低操作門檻</td></tr>
+    <tr><td><b>居家關懷巡檢</b></td><td>結合 GPS 定點導航、第一人稱影像與語音介面,可發展為室內外巡檢平台 —— 例如獨居長者居家狀態之定時查看(本專案之長期發展方向)</td></tr>
+    <tr><td><b>低成本研究平台</b></td><td>全系統以通用模組構成(總成本遠低於商用研究機),控制演算法、通訊協定皆可自由修改,適合演算法驗證實驗</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2><span class="no">E.4</span>未來工作</h2>
   <div class="table-scroll"><table>
     <tr><th>項目</th><th>內容</th><th>優先序</th></tr>
     <tr><td>本地離線語音辨識</td><td>導入 Espressif ESP-SR(AFE + MultiNet),以拼音定義中文命令詞於裝置端直接辨識;消除網路依賴、速率限制與雲端延遲(目標 &lt; 1 s)。需自行打包中文模型(mn6_cn)至 flash model 分區</td><td>高</td></tr>
@@ -100,14 +120,14 @@
   </table></div>
 </section>
 
-<section class="refs">
-  <h2><span class="no">E.3</span>參考資料</h2>
+<section class="refs" id="refs">
+  <h2><span class="no">E.5</span>參考資料</h2>
   <ol>
-    <li>Espressif Systems, <i>ESP32-S3 Technical Reference Manual</i>. <a href="https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf" target="_blank">espressif.com</a></li>
-    <li>Nordic Semiconductor, <i>nRF24L01+ Single Chip 2.4GHz Transceiver Product Specification v1.0</i>. <a href="https://www.nordicsemi.com/Products/nRF24-series" target="_blank">nordicsemi.com</a></li>
-    <li>InvenSense (TDK), <i>MPU-6000 and MPU-6050 Product Specification Revision 3.4</i>. <a href="https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/" target="_blank">invensense.tdk.com</a></li>
-    <li>Espressif Systems, <i>ESP-SR Speech Recognition Framework Documentation</i>. <a href="https://docs.espressif.com/projects/esp-sr/zh_CN/latest/esp32s3/" target="_blank">docs.espressif.com</a></li>
-    <li>Groq Inc., <i>GroqCloud API Documentation — Speech to Text / Chat Completions</i>. <a href="https://console.groq.com/docs" target="_blank">console.groq.com/docs</a></li>
+    <li>Instructables, <i>Build a Voice-Controlled AI Assistant on ESP32</i> — ESP32 語音助理之雲端辨識架構參考. <a href="https://www.instructables.com/Build-a-Voice-Controlled-AI-Assistant-on-ESP32-Usi/" target="_blank">instructables.com</a></li>
+    <li>立創開發板文檔, <i>ESP32-S3 語音辨識(ESP-SR / MultiNet)</i> — 本地離線中文命令詞辨識教學. <a href="https://wiki.lckfb.com/zh-hans/szpi-esp32s3/beginner/voice-recognition.html" target="_blank">wiki.lckfb.com</a></li>
+    <li>78/xiaozhi-esp32, <i>小智 AI — ESP32 語音對話助理開源專案</i>(串流 ASR + LLM + TTS 架構). <a href="https://github.com/78/xiaozhi-esp32" target="_blank">github.com/78/xiaozhi-esp32</a></li>
+    <li>Oscar Liang, <i>PID Controller Explained — How PID Works in Drones / Flight Controllers</i> — 無人機 PID 控制與調參原理. <a href="https://oscarliang.com/pid/" target="_blank">oscarliang.com</a></li>
+    <li>Espressif Systems, <i>ESP-SR Speech Recognition Framework Documentation</i>(AFE / WakeNet / MultiNet 官方文件). <a href="https://docs.espressif.com/projects/esp-sr/zh_CN/latest/esp32s3/" target="_blank">docs.espressif.com</a></li>
   </ol>
 </section>
 
