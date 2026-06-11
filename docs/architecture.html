@@ -135,6 +135,11 @@
     <div class="cap">圖 A-1 飛行控制器主迴圈資料流</div>
   </div>
 
+  <figure style="max-width:640px;margin:18px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden">
+    <img src="media/drone-serial.png" alt="飛機端序列埠數據" style="width:100%;display:block" loading="lazy">
+    <figcaption style="padding:10px 14px;font-size:13.5px;color:var(--dim);text-align:center">開發期除錯:飛行控制器經 USB 序列埠輸出主迴圈即時數據(姿態 / PID / 馬達輸出)</figcaption>
+  </figure>
+
   <h3>A.2.3 地面站程式結構</h3>
   <ul>
     <li><b>50 Hz 控制迴圈</b>:搖桿 ADC 取樣(含反相校正與中位映射)→ 開關狀態編碼 → 組裝 Signal 封包 → nRF24 發送 → 讀取 ACK payload 遙測。</li>
