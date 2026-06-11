@@ -158,6 +158,7 @@ volatile bool    g_vPTT    = false;  // 主迴圈寫:左肩鈕按住中
 volatile uint8_t g_vAction = 0;      // task 寫:0無 1takeoff 2land 3stop 4move
 volatile int8_t  g_vDirX = 0, g_vDirY = 0, g_vDirZ = 0;   // move 方向(roll/pitch/throttle)
 volatile uint8_t g_vDur  = 0;        // move 秒數
+volatile uint8_t g_vMotor = 1;       // spin 動作:轉哪顆馬達(1~4)
 volatile bool    g_vFresh = false;   // task 寫 true → 主迴圈消化後寫 false
 char             g_vStatus[48] = "開機中";   // task 寫狀態字串(主迴圈顯示)
 
@@ -1374,6 +1375,11 @@ void videoModeLoop(int btnEdge) {
 // 安全:搖桿一動立刻搶回;move 限時;模式開關最高優先。
 // ============================================================
 #if ENABLE_VOICE_MODE10
+// --- Demo 旗標:還不能穩飛之前,語音動作一律轉成「單馬達輕轉」 ---
+// 1 = demo(起飛→轉1號、轉N號馬達→轉N號、降落/停→停轉;不碰虛擬搖桿)
+// 0 = 完整飛行映射(虛擬搖桿 takeoff/hover/move/land)
+#define VOICE_DEMO_SPIN  1
+
 // --- 可調參數(拆槳地面測試後修正)---
 #define VOICE_THR_HOVER  135   // 懸停虛擬油門(0~255);實測懸停點後改
 #define VOICE_TILT        50   // move 搖桿偏移(50 ≈ 7.9°,MAX_ANGLE 20° 時)
@@ -1402,6 +1408,19 @@ const char* vProgName() {
 }
 
 void applyVoiceOverride() {
+#if VOICE_DEMO_SPIN
+  // Demo:語音動作 → 單馬達輕轉指令(paramID 110/111),不碰虛擬搖桿。
+  // 飛機端只在「未武裝 + 油門收底」才執行,轉 3 秒自動停。
+  if (g_vFresh) {
+    g_vFresh = false;
+    static float spinPulse = 0;       // 每次 +10,飛機 dedup 看值變化;%10 取馬達編號
+    spinPulse += 10;
+    if (g_vAction == 1)      { data.paramID = 110; data.paramVal = 1        + spinPulse; }  // 起飛→轉1號
+    else if (g_vAction == 5) { data.paramID = 110; data.paramVal = g_vMotor + spinPulse; }  // 轉N號馬達
+    else if (g_vAction == 2 || g_vAction == 3) { data.paramID = 111; data.paramVal = spinPulse; }  // 降落/停→停轉
+  }
+  return;
+#endif
   // 收到新動作 → 啟動程式,記錄搖桿基準
   if (g_vFresh) {
     g_vFresh = false;
@@ -1576,11 +1595,12 @@ String vParseLlama(const String& userText) {
   if (!client.connect("api.groq.com", 443)) { vSetStatus("LLM 連線失敗"); return ""; }
 
   String body = String("{\"model\":\"llama-3.3-70b-versatile\",\"messages\":["
-    "{\"role\":\"system\",\"content\":\"你是無人機語音指令解析器。把使用者的中文輸入翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。只回 JSON。\"},"
+    "{\"role\":\"system\",\"content\":\"你是無人機語音指令解析器。把使用者的中文輸入翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、spin(轉馬達,要 motor: 1-4)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。只回 JSON。\"},"
     "{\"role\":\"user\",\"content\":\"起飛\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"takeoff\\\"}\"},"
     "{\"role\":\"user\",\"content\":\"降落\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"land\\\"}\"},"
     "{\"role\":\"user\",\"content\":\"停下來\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"stop\\\"}\"},"
     "{\"role\":\"user\",\"content\":\"向前飛三秒\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3}\"},"
+    "{\"role\":\"user\",\"content\":\"轉一號馬達\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"spin\\\",\\\"motor\\\":1}\"},"
     "{\"role\":\"user\",\"content\":\"") + vJsonEscape(userText) + "\"}],"
     "\"response_format\":{\"type\":\"json_object\"},\"temperature\":0.1}";
 
@@ -1637,6 +1657,14 @@ void vEmitAction(const String& json, const String& transcript) {
     int di = json.indexOf("\"duration_sec\":");
     g_vDur = (di > 0) ? (uint8_t)json.substring(di + 15).toInt() : 2;
     snprintf(buf, sizeof(buf), "「%s」→移動 %ds", transcript.c_str(), g_vDur);
+  }
+  else if (act == "spin") {
+    g_vAction = 5;
+    int mi = json.indexOf("\"motor\":");
+    int m = (mi > 0) ? json.substring(mi + 8).toInt() : 1;
+    if (m < 1 || m > 4) m = 1;
+    g_vMotor = (uint8_t)m;
+    snprintf(buf, sizeof(buf), "「%s」→轉%d號馬達", transcript.c_str(), m);
   }
   else { g_vAction = 0; snprintf(buf, sizeof(buf), "「%s」→聽不懂", transcript.c_str()); vSetStatus(buf); return; }
   vSetStatus(buf);

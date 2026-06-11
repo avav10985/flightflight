@@ -169,6 +169,11 @@ Telemetry     tele;
 float         batteryV    = 0;
 bool          armed       = false;
 bool          safetyReleased = false;   // 開機 LOCK：看到 mode 0 才解鎖
+
+// ---- 語音 demo:單馬達輕轉(paramID 110/111 觸發,只在未武裝時)----
+#define DEMO_SPIN_PWM 1100          // 輕轉 PWM(1000=停,夠看得到轉就好)
+int           demoMotor = 0;        // 0=無,1~4=轉哪顆
+unsigned long demoUntil = 0;        // 自動停止時間
 unsigned long lastRxTime  = 0;
 unsigned long lastDbgTime = 0;
 float         roll = 0, pitch = 0, yawRate = 0;
@@ -767,6 +772,18 @@ void applyCommand() {
       Serial.printf(">> PID 已存 NVS: Kp=%.3f Ki=%.3f Kd=%.3f KpY=%.3f KiY=%.3f\n",
                     Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
       break;
+    case 110:   // 語音 demo:輕轉單顆馬達(paramVal % 10 = 馬達編號 1~4)
+      if (!armed && data.throttle < 5) {
+        demoMotor = ((int)data.paramVal) % 10;
+        if (demoMotor < 1 || demoMotor > 4) { demoMotor = 0; break; }
+        demoUntil = millis() + 3000;   // 轉 3 秒自動停
+        Serial.printf(">> 語音 demo:轉 M%d(3 秒)\n", demoMotor);
+      }
+      break;
+    case 111:   // 語音 demo:停轉
+      demoMotor = 0;
+      Serial.println(">> 語音 demo:停轉");
+      break;
     default: break;
   }
 }
@@ -994,6 +1011,15 @@ void pidControl() {
 
 void writeMotors() {
   if (!armed) {
+    // 語音 demo:未武裝時轉指定那顆,時間到自動停
+    if (demoMotor >= 1 && demoMotor <= 4 && millis() < demoUntil) {
+      esc1.writeMicroseconds(demoMotor == 1 ? DEMO_SPIN_PWM : 1000);
+      esc2.writeMicroseconds(demoMotor == 2 ? DEMO_SPIN_PWM : 1000);
+      esc3.writeMicroseconds(demoMotor == 3 ? DEMO_SPIN_PWM : 1000);
+      esc4.writeMicroseconds(demoMotor == 4 ? DEMO_SPIN_PWM : 1000);
+      return;
+    }
+    demoMotor = 0;
     esc1.writeMicroseconds(1000);
     esc2.writeMicroseconds(1000);
     esc3.writeMicroseconds(1000);
