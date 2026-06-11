@@ -110,8 +110,9 @@ LGFX tft;
 #define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
 #define ENABLE_MUSIC            0   // 任意 mode 都可放音樂(需 SD + MAX98357A)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
-#define ENABLE_SD               0   // SD 卡模組:0 = 停用(2026-06-09 SD 模組搶 SPI bus 拖爆 NRF24,
-                                    // 飛行測試先拔 SD VCC + 程式跳過 SD init。GPIO 47 釋出)
+#define ENABLE_SD               1   // SD 卡模組:1 = 啟用(2026-06-11 新電源架構後重測。
+                                    // 2026-06-09 曾因模組 level shifter 搶 SPI bus 拖爆 NRF24 停用;
+                                    // 若 chip connected 變 NO 或飛機連不上,改回 0)
 #define PIN_I2S_BCLK   11           // V2-B 語音模組腳位(共用 INMP441 + MAX98357A)
 #define PIN_I2S_WS     12
 #define PIN_I2S_DOUT   13           // → MAX98357A DIN
