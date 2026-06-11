@@ -334,7 +334,7 @@ void setup() {
 
   // TFT 啟動
   tft.init();
-  tft.setRotation(0);   // 直立 240×320
+  tft.setRotation(2);   // 直立 240×320,跟 Ground_TX_ESP32 / Voice_Test 同方向
   tft.fillScreen(TFT_BLACK);
   tft.fillRect(0, 0, 240, 50, TFT_NAVY);
   tft.setFont(&fonts::efontTW_24);
