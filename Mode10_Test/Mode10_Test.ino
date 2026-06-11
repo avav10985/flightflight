@@ -108,21 +108,13 @@ void tftHint(const char* text) {
 #define MAX_SAMPLES     (SAMPLE_RATE * MAX_REC_SECS)
 #define I2S_CHUNK         512
 
-// Groq API(Whisper STT)
-#define GROQ_HOST       "api.groq.com"
-#define GROQ_PORT       443
-#define GROQ_STT_PATH   "/openai/v1/audio/transcriptions"
-#define GROQ_STT_MODEL  "whisper-large-v3-turbo"
-#define GROQ_LANGUAGE   "zh"
-
-// Google Gemini API(文字 → JSON 指令)
+// Google Gemini API(語音直送 → JSON 指令,一次完成 STT + 解析)
 #define GEMINI_HOST     "generativelanguage.googleapis.com"
 #define GEMINI_PORT     443
 #define GEMINI_MODEL    "gemini-2.0-flash"
-// 路徑要動態組(含 API key 在 query string),見 parseCommandWithGemini()
 
-// Gemini prompt(放在 user content 裡,Gemini 不分 system/user)
-#define LLM_PROMPT_PREFIX "你是無人機語音指令解析器。把下面這句中文翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。範例:起飛→{\\\"action\\\":\\\"takeoff\\\"} ; 降落→{\\\"action\\\":\\\"land\\\"} ; 向前飛三秒→{\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3} ; 停下來→{\\\"action\\\":\\\"stop\\\"} ; 切到 GPS 模式→{\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}。只回 JSON,不要其他文字。輸入:"
+// Gemini prompt(直接吃 audio 然後回 JSON 含 transcript + action)
+#define GEMINI_PROMPT "你是無人機語音指令解析器。聽下面這段中文語音,回傳 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)、unknown(聽不懂)。格式:{\\\"transcript\\\":\\\"<聽到的中文>\\\",\\\"action\\\":\\\"<動作>\\\"}。範例:聽到起飛→{\\\"transcript\\\":\\\"起飛\\\",\\\"action\\\":\\\"takeoff\\\"};聽到向前飛三秒→{\\\"transcript\\\":\\\"向前飛三秒\\\",\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3};聽到切到 GPS 模式→{\\\"transcript\\\":\\\"切到 GPS 模式\\\",\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}。只回 JSON。"
 
 i2s_chan_handle_t i2s_rx = nullptr;
 int16_t* recBuf = nullptr;
@@ -223,6 +215,7 @@ bool ensureWiFi() {
 }
 
 // 送 PCM 上 Groq Whisper,回傳辨識文字(失敗回空字串)
+#if 0   // Groq Whisper STT 暫時保留程式碼,但這版用 Gemini 不呼叫
 String transcribeWithGroq() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[GROQ] WiFi 沒連,跳過");
@@ -328,6 +321,7 @@ String transcribeWithGroq() {
   if (textEnd < 0) return "";
   return body.substring(textStart, textEnd);
 }
+#endif   // Groq Whisper 程式碼結束
 
 // JSON 字串需要 escape 的字元(quote / backslash / control chars)
 String jsonEscape(const String& s) {
@@ -368,28 +362,70 @@ String jsonUnescape(const String& s) {
   return out;
 }
 
-// 文字 → Google Gemini → JSON 指令字串(失敗回空字串)
-String parseCommandWithGemini(const String& userText) {
-  if (WiFi.status() != WL_CONNECTED) return "";
-  if (userText.length() == 0) return "";
+// Base64 編碼(輸入 inLen bytes,寫出 ceil(inLen/3)*4 chars 到 out)
+static const char B64_CHARSET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+void base64Encode(const uint8_t* in, size_t inLen, char* out) {
+  size_t i = 0, j = 0;
+  while (i + 2 < inLen) {
+    uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8) | in[i+2];
+    out[j++] = B64_CHARSET[(v >> 18) & 0x3F];
+    out[j++] = B64_CHARSET[(v >> 12) & 0x3F];
+    out[j++] = B64_CHARSET[(v >> 6)  & 0x3F];
+    out[j++] = B64_CHARSET[v & 0x3F];
+    i += 3;
+  }
+  if (i < inLen) {
+    uint32_t v = (uint32_t)in[i] << 16;
+    if (i + 1 < inLen) v |= (uint32_t)in[i+1] << 8;
+    out[j++] = B64_CHARSET[(v >> 18) & 0x3F];
+    out[j++] = B64_CHARSET[(v >> 12) & 0x3F];
+    out[j++] = (i + 1 < inLen) ? B64_CHARSET[(v >> 6) & 0x3F] : '=';
+    out[j++] = '=';
+  }
+}
 
+// PCM audio → Gemini → JSON {"transcript":"...","action":"..."}
+// 把錄音 base64 + WAV header 一起 POST 給 Gemini,一次拿 STT + 解析
+String processAudioWithGemini() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[GEM] WiFi 沒連");
+    return "";
+  }
+  uint32_t pcmBytes = recCount * 2;
+  if (pcmBytes == 0) return "";
+  uint32_t wavBytes = 44 + pcmBytes;
+  uint32_t b64Bytes = ((wavBytes + 2) / 3) * 4;
+
+  // PSRAM 配置 WAV + base64 buffer(臨時)
+  uint8_t* wav = (uint8_t*)heap_caps_malloc(wavBytes, MALLOC_CAP_SPIRAM);
+  if (!wav) { Serial.println("[GEM] PSRAM wav alloc 失敗"); return ""; }
+  buildWavHeader(wav, pcmBytes);
+  memcpy(wav + 44, recBuf, pcmBytes);
+
+  char* b64 = (char*)heap_caps_malloc(b64Bytes + 1, MALLOC_CAP_SPIRAM);
+  if (!b64) { heap_caps_free(wav); Serial.println("[GEM] PSRAM b64 alloc 失敗"); return ""; }
+  base64Encode(wav, wavBytes, b64);
+  b64[b64Bytes] = 0;
+  heap_caps_free(wav);
+
+  Serial.printf("[GEM] 連線 Gemini ... (audio %u → base64 %u bytes)\n", wavBytes, b64Bytes);
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(10000);
+  client.setTimeout(15000);
   if (!client.connect(GEMINI_HOST, GEMINI_PORT)) {
-    Serial.println("[LLM] Gemini TLS 連線失敗");
+    Serial.println("[GEM] TLS 連線失敗");
+    heap_caps_free(b64);
     return "";
   }
 
-  String userEsc = jsonEscape(userText);
-  // Gemini API body:contents 包 prompt + 使用者輸入,要求回 JSON
-  String body = String("{")
-              + "\"contents\":[{\"parts\":[{\"text\":\"" + LLM_PROMPT_PREFIX + userEsc + "\"}]}],"
-              + "\"generationConfig\":{"
-              + "\"responseMimeType\":\"application/json\","
-              + "\"temperature\":0.1,"
-              + "\"maxOutputTokens\":128"
-              + "}}";
+  // JSON body 前後段(中間塞 base64)
+  String head = String("{\"contents\":[{\"parts\":["
+              "{\"text\":\"") + GEMINI_PROMPT + "\"},"
+              "{\"inline_data\":{\"mime_type\":\"audio/wav\",\"data\":\"";
+  String tail = "\"}}]}],\"generationConfig\":{"
+                "\"responseMimeType\":\"application/json\","
+                "\"temperature\":0.1,\"maxOutputTokens\":256}}";
+  uint32_t bodyLen = head.length() + b64Bytes + tail.length();
 
   String path = String("/v1beta/models/") + GEMINI_MODEL
               + ":generateContent?key=" + GEMINI_API_KEY;
@@ -397,29 +433,39 @@ String parseCommandWithGemini(const String& userText) {
   client.printf("POST %s HTTP/1.1\r\n", path.c_str());
   client.printf("Host: %s\r\n", GEMINI_HOST);
   client.print("Content-Type: application/json\r\n");
-  client.printf("Content-Length: %d\r\n", body.length());
+  client.printf("Content-Length: %u\r\n", bodyLen);
   client.print("Connection: close\r\n\r\n");
-  client.print(body);
+  client.print(head);
+  // base64 分塊送(避免一次 write 太多)
+  const size_t CHUNK = 4096;
+  uint32_t remain = b64Bytes;
+  char* p = b64;
+  while (remain > 0) {
+    size_t n = remain > CHUNK ? CHUNK : remain;
+    client.write((const uint8_t*)p, n);
+    p += n; remain -= n;
+  }
+  client.print(tail);
+  heap_caps_free(b64);
 
-  Serial.println("[LLM] Gemini 等回應 ...");
+  Serial.println("[GEM] 上傳完,等回應 ...");
   unsigned long t0 = millis();
-  while (!client.available() && millis() - t0 < 10000) delay(10);
+  while (!client.available() && millis() - t0 < 15000) delay(10);
   String full = "";
   while (client.available()) full += client.readString();
   client.stop();
 
-  if (full.length() == 0) { Serial.println("[LLM] 沒回應"); return ""; }
+  if (full.length() == 0) { Serial.println("[GEM] 沒回應"); return ""; }
   int first = full.indexOf("\r\n");
-  if (first > 0) Serial.printf("[LLM] %s\n", full.substring(0, first).c_str());
+  if (first > 0) Serial.printf("[GEM] %s\n", full.substring(0, first).c_str());
 
-  // Gemini response 結構: {"candidates":[{"content":{"parts":[{"text":"..."}]}}]}
-  // 抽 "text":"..." 那段就是 Gemini 回的 JSON 字串
+  // 抽 candidates[0].content.parts[0].text(裡面又是 JSON 字串)
   int jsonStart = full.indexOf('{');
   if (jsonStart < 0) return "";
   String resBody = full.substring(jsonStart);
   int textKey = resBody.indexOf("\"text\":\"");
   if (textKey < 0) {
-    Serial.println("[LLM] Gemini 無 text 欄位,完整 body:");
+    Serial.println("[GEM] 無 text 欄位:");
     Serial.println(resBody);
     return "";
   }
@@ -432,8 +478,17 @@ String parseCommandWithGemini(const String& userText) {
   }
   if (te >= (int)resBody.length()) return "";
   String textEscaped = resBody.substring(ts, te);
-  String textJson = jsonUnescape(textEscaped);
-  return textJson;
+  return jsonUnescape(textEscaped);
+}
+
+// 從回傳 JSON 抽 transcript 欄位
+String extractTranscript(const String& json) {
+  int idx = json.indexOf("\"transcript\":\"");
+  if (idx < 0) return "";
+  int s = idx + 14;
+  int e = json.indexOf("\"", s);
+  if (e < 0) return "";
+  return json.substring(s, e);
 }
 
 // 從 LLM 回傳的 JSON 字串抽 action 欄位
@@ -462,40 +517,29 @@ void stopRec() {
     tftHint("按肩鈕重試,講大聲一點");
     return;
   }
-  // Phase 2:STT
+  // Gemini 一次完成:audio → STT + 解析
   if (!ensureWiFi()) {
     tftStatus("WiFi 失聯", TFT_RED);
     tftHint("確認熱點開著再試");
     return;
   }
-  tftStatus("上傳中...", TFT_YELLOW);
+  tftStatus("處理中...", TFT_YELLOW);
   unsigned long t0 = millis();
-  String text = transcribeWithGroq();
+  String json = processAudioWithGemini();
   unsigned long t1 = millis() - t0;
-  if (text.length() == 0) {
-    Serial.printf("[STT] 失敗 (%lu ms)\n", t1);
+  if (json.length() == 0) {
+    Serial.printf("[GEM] 失敗 (%lu ms)\n", t1);
     tftStatus("辨識失敗", TFT_RED);
     tftHint("按肩鈕重試");
     return;
   }
-  Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
-  tftTranscript(text.c_str());
-
-  // Phase 3:文字 → JSON 指令
-  tftStatus("解析中...", TFT_YELLOW);
-  unsigned long t2 = millis();
-  String llmJson = parseCommandWithGemini(text);
-  unsigned long t3 = millis() - t2;
-  if (llmJson.length() == 0) {
-    Serial.printf("[LLM] 失敗 (%lu ms)\n", t3);
-    tftStatus("解析失敗", TFT_RED);
-    tftHint("按肩鈕重試");
-    return;
-  }
-  Serial.printf("[LLM] (%lu ms) %s\n", t3, llmJson.c_str());
-  String action = extractAction(llmJson);
-  Serial.printf("[ACT] action=%s\n", action.c_str());
-  // TFT 顯示 action(取代「完成」)
+  Serial.printf("[GEM] (%lu ms) %s\n", t1, json.c_str());
+  String transcript = extractTranscript(json);
+  String action     = extractAction(json);
+  Serial.printf("[ACT] transcript=「%s」 action=%s\n",
+                transcript.c_str(), action.c_str());
+  // 顯示辨識文字 + action
+  if (transcript.length() > 0) tftTranscript(transcript.c_str());
   char buf[64];
   snprintf(buf, sizeof(buf), "→ %s", action.c_str());
   tftStatus(buf, TFT_GREEN);
