@@ -100,9 +100,13 @@ LGFX tft;
 #define PIN_SPI_SCK  38
 #define PIN_SPI_MOSI 39
 #define PIN_SPI_MISO 40
-#define PIN_SD_CS   47   // SD CS:ENABLE_SD = 0 時這隻腳不操作,可挪做他用
-                         // 注意:SD 模組内含 level shifter,共 SPI 會搶 bus 拖爆 NRF24,
-                         //       使用時 VCC 接 5V 軌(模組內 IC 需要 5V)
+// SD 卡:獨立第二組 SPI(SPI3/HSPI),跟 NRF24/TFT 的 bus 完全分開。
+// 2026-06-12 實測:SD 模組 level shifter 在共用 bus 上不放開 MISO,
+// 連新電源架構也救不了 → 搬到專用腳位,讓它佔自己的線
+#define PIN_SD_CS   47   // SD CS(沿用)
+#define PIN_SD_SCK  15   // SD 專用 SCK(真正釋出腳)
+#define PIN_SD_MOSI 17   // SD 專用 MOSI(真正釋出腳)
+#define PIN_SD_MISO  3   // SD 專用 MISO(JTAG 選擇腳,平常無作用)
 
 // ====== V2-B 跟其他 feature 旗標(2026-06-06)======
 // 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**
@@ -167,6 +171,9 @@ Signal    data;
 Telemetry tele;
 bool      teleOK = false;
 bool      sdOK   = false;
+#if ENABLE_SD
+SPIClass  spiSD(HSPI);   // SD 專用第二組 SPI(S3 上 HSPI = SPI3)
+#endif
 
 // ---- 模式名稱(中文化,2026-06-06)----
 // 兩位數 mode 編碼,值為 0/1/2/10/11/12/20/21/22(9 個離散值)
@@ -535,12 +542,13 @@ void setup() {
   Serial.println("[+] NRF24 就緒");
 
 #if ENABLE_SD
-  // SD(選用,沒卡也繼續)
+  // SD(選用,沒卡也繼續)— 用獨立 SPI3,不碰 NRF24/TFT 的 bus
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
-  if (SD.begin(PIN_SD_CS, SPI)) {
+  spiSD.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
+  if (SD.begin(PIN_SD_CS, spiSD)) {
     sdOK = true;
-    Serial.println("[+] SD 卡掛載成功");
+    Serial.println("[+] SD 卡掛載成功(獨立 SPI3)");
   } else {
     Serial.println("[*] SD 卡未接或初始化失敗(繼續)");
   }
