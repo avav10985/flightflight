@@ -108,13 +108,17 @@ void tftHint(const char* text) {
 #define MAX_SAMPLES     (SAMPLE_RATE * MAX_REC_SECS)
 #define I2S_CHUNK         512
 
-// Google Gemini API(語音直送 → JSON 指令,一次完成 STT + 解析)
-#define GEMINI_HOST     "generativelanguage.googleapis.com"
-#define GEMINI_PORT     443
-#define GEMINI_MODEL    "gemini-2.0-flash-lite"   // Lite 版 30 RPM 限額,比 flash 多一倍
+// Groq API:Whisper STT + Llama 解析
+#define GROQ_HOST       "api.groq.com"
+#define GROQ_PORT       443
+#define GROQ_STT_PATH   "/openai/v1/audio/transcriptions"
+#define GROQ_CHAT_PATH  "/openai/v1/chat/completions"
+#define GROQ_STT_MODEL  "whisper-large-v3-turbo"
+#define GROQ_LLM_MODEL  "llama-3.3-70b-versatile"
+#define GROQ_LANGUAGE   "zh"
 
-// Gemini prompt(直接吃 audio 然後回 JSON 含 transcript + action)
-#define GEMINI_PROMPT "你是無人機語音指令解析器。聽下面這段中文語音,回傳 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)、unknown(聽不懂)。格式:{\\\"transcript\\\":\\\"<聽到的中文>\\\",\\\"action\\\":\\\"<動作>\\\"}。範例:聽到起飛→{\\\"transcript\\\":\\\"起飛\\\",\\\"action\\\":\\\"takeoff\\\"};聽到向前飛三秒→{\\\"transcript\\\":\\\"向前飛三秒\\\",\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3};聽到切到 GPS 模式→{\\\"transcript\\\":\\\"切到 GPS 模式\\\",\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}。只回 JSON。"
+// Llama prompt(放在 system message)
+#define LLM_SYSTEM_PROMPT "你是無人機語音指令解析器。把使用者的中文輸入翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。只回 JSON,不要其他文字。"
 
 i2s_chan_handle_t i2s_rx = nullptr;
 int16_t* recBuf = nullptr;
@@ -215,7 +219,6 @@ bool ensureWiFi() {
 }
 
 // 送 PCM 上 Groq Whisper,回傳辨識文字(失敗回空字串)
-#if 0   // Groq Whisper STT 暫時保留程式碼,但這版用 Gemini 不呼叫
 String transcribeWithGroq() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[GROQ] WiFi 沒連,跳過");
@@ -321,7 +324,6 @@ String transcribeWithGroq() {
   if (textEnd < 0) return "";
   return body.substring(textStart, textEnd);
 }
-#endif   // Groq Whisper 程式碼結束
 
 // JSON 字串需要 escape 的字元(quote / backslash / control chars)
 String jsonEscape(const String& s) {
@@ -385,10 +387,83 @@ void base64Encode(const uint8_t* in, size_t inLen, char* out) {
 }
 
 // 失敗時填這個,讓 TFT 顯示具體錯誤
-String g_geminiErr = "";
+// 留錯誤訊息給 TFT 顯示
+String g_lastErr = "";
 
-// PCM audio → Gemini → JSON {"transcript":"...","action":"..."}
-// 把錄音 base64 + WAV header 一起 POST 給 Gemini,一次拿 STT + 解析
+// 文字 → Groq Llama → JSON 指令字串(失敗回空字串)
+String parseCommandWithLlama(const String& userText) {
+  g_lastErr = "";
+  if (WiFi.status() != WL_CONNECTED) { g_lastErr = "WiFi 斷"; return ""; }
+  if (userText.length() == 0) return "";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(10000);
+  if (!client.connect(GROQ_HOST, GROQ_PORT)) {
+    g_lastErr = "Llama TLS 失敗";
+    return "";
+  }
+
+  String userEsc = jsonEscape(userText);
+  String body = String("{\"model\":\"") + GROQ_LLM_MODEL + "\","
+              + "\"messages\":["
+              + "{\"role\":\"system\",\"content\":\"" + LLM_SYSTEM_PROMPT + "\"},"
+              + "{\"role\":\"user\",\"content\":\"起飛\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"takeoff\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"降落\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"land\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"停下來\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"stop\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"向前飛三秒\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3}\"},"
+              + "{\"role\":\"user\",\"content\":\"切到 GPS 模式\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}\"},"
+              + "{\"role\":\"user\",\"content\":\"" + userEsc + "\"}"
+              + "],"
+              + "\"response_format\":{\"type\":\"json_object\"},"
+              + "\"temperature\":0.1}";
+
+  client.printf("POST %s HTTP/1.1\r\n", GROQ_CHAT_PATH);
+  client.printf("Host: %s\r\n", GROQ_HOST);
+  client.printf("Authorization: Bearer %s\r\n", GROQ_API_KEY);
+  client.print("Content-Type: application/json\r\n");
+  client.printf("Content-Length: %d\r\n", body.length());
+  client.print("Connection: close\r\n\r\n");
+  client.print(body);
+
+  unsigned long t0 = millis();
+  while (!client.available() && millis() - t0 < 10000) delay(10);
+  String full = "";
+  while (client.available()) full += client.readString();
+  client.stop();
+
+  if (full.length() == 0) { g_lastErr = "Llama 無回應"; return ""; }
+  int first = full.indexOf("\r\n");
+  String statusLine = (first > 0) ? full.substring(0, first) : "??";
+  Serial.printf("[LLM] %s\n", statusLine.c_str());
+  if (statusLine.indexOf("200") < 0) {
+    g_lastErr = statusLine.substring(0, 24);
+    Serial.println(full);
+    return "";
+  }
+
+  int jsonStart = full.indexOf('{');
+  if (jsonStart < 0) { g_lastErr = "Llama 無 JSON"; return ""; }
+  String resBody = full.substring(jsonStart);
+  int contentKey = resBody.indexOf("\"content\":\"");
+  if (contentKey < 0) { g_lastErr = "無 content"; return ""; }
+  int cs = contentKey + 11;
+  int ce = cs;
+  while (ce < (int)resBody.length()) {
+    if (resBody[ce] == '\\' && ce + 1 < (int)resBody.length()) { ce += 2; continue; }
+    if (resBody[ce] == '"') break;
+    ce++;
+  }
+  if (ce >= (int)resBody.length()) return "";
+  return jsonUnescape(resBody.substring(cs, ce));
+}
+
+#if 0   // Gemini 版本暫時封存,撞 429 暫不用,留著之後可能恢復
 String processAudioWithGemini() {
   g_geminiErr = "";
   if (WiFi.status() != WL_CONNECTED) {
@@ -507,6 +582,7 @@ String processAudioWithGemini() {
   String textEscaped = resBody.substring(ts, te);
   return jsonUnescape(textEscaped);
 }
+#endif   // Gemini 程式碼結束(撞 429 暫停用)
 
 // 從回傳 JSON 抽 transcript 欄位
 String extractTranscript(const String& json) {
@@ -544,32 +620,41 @@ void stopRec() {
     tftHint("按肩鈕重試,講大聲一點");
     return;
   }
-  // Gemini 一次完成:audio → STT + 解析
+  // Phase 2:Groq Whisper STT
   if (!ensureWiFi()) {
     tftStatus("WiFi 失聯", TFT_RED);
     tftHint("確認熱點開著再試");
     return;
   }
-  tftStatus("處理中...", TFT_YELLOW);
+  tftStatus("上傳中...", TFT_YELLOW);
   unsigned long t0 = millis();
-  String json = processAudioWithGemini();
+  String text = transcribeWithGroq();
   unsigned long t1 = millis() - t0;
-  if (json.length() == 0) {
-    Serial.printf("[GEM] 失敗 (%lu ms) %s\n", t1, g_geminiErr.c_str());
+  if (text.length() == 0) {
     char ebuf[64];
-    snprintf(ebuf, sizeof(ebuf), "失敗:%s",
-             g_geminiErr.length() > 0 ? g_geminiErr.c_str() : "未知");
+    snprintf(ebuf, sizeof(ebuf), "STT 失敗");
     tftStatus(ebuf, TFT_RED);
     tftHint("按肩鈕重試");
     return;
   }
-  Serial.printf("[GEM] (%lu ms) %s\n", t1, json.c_str());
-  String transcript = extractTranscript(json);
-  String action     = extractAction(json);
-  Serial.printf("[ACT] transcript=「%s」 action=%s\n",
-                transcript.c_str(), action.c_str());
-  // 顯示辨識文字 + action
-  if (transcript.length() > 0) tftTranscript(transcript.c_str());
+  Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
+  tftTranscript(text.c_str());
+
+  // Phase 3:Groq Llama 解析
+  tftStatus("解析中...", TFT_YELLOW);
+  unsigned long t2 = millis();
+  String llmJson = parseCommandWithLlama(text);
+  unsigned long t3 = millis() - t2;
+  if (llmJson.length() == 0) {
+    char ebuf[64];
+    snprintf(ebuf, sizeof(ebuf), "失敗:%s",
+             g_lastErr.length() > 0 ? g_lastErr.c_str() : "Llama");
+    tftStatus(ebuf, TFT_RED);
+    tftHint("按肩鈕重試");
+    return;
+  }
+  Serial.printf("[LLM] (%lu ms) %s\n", t3, llmJson.c_str());
+  String action = extractAction(llmJson);
   char buf[64];
   snprintf(buf, sizeof(buf), "→ %s", action.c_str());
   tftStatus(buf, TFT_GREEN);
