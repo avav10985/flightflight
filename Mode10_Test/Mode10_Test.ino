@@ -80,16 +80,26 @@ void tftStatus(const char* line, uint16_t color = TFT_YELLOW) {
 }
 
 void tftTranscript(const char* text) {
-  tft.fillRect(0, 160, 240, 120, TFT_BLACK);
+  tft.fillRect(0, 160, 240, 110, TFT_BLACK);
   tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setCursor(10, 170);
   tft.print("辨識:");
-  // 文字可能很長,自動換行
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(10, 200);
-  // 用 print 自動換行(LovyanGFX 預設行為)
   tft.println(text);
+}
+
+void tftClearTranscript() {
+  tft.fillRect(0, 160, 240, 110, TFT_BLACK);
+}
+
+void tftHint(const char* text) {
+  tft.fillRect(0, 280, 240, 40, TFT_BLACK);
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(10, 290);
+  tft.print(text);
 }
 
 #define SAMPLE_RATE     16000
@@ -162,6 +172,8 @@ void startRec() {
   recStartMs = millis();
   Serial.println("[REC] 開始");
   tftStatus("● 錄音中...", TFT_RED);
+  tftClearTranscript();   // 清掉上次結果
+  tftHint("放開肩鈕送出");
 }
 
 void stopRec();
@@ -417,6 +429,7 @@ void stopRec() {
   if (maxAmp < 100) {
     Serial.println("      ⚠ 訊號太弱,不上傳");
     tftStatus("訊號太弱", TFT_ORANGE);
+    tftHint("按肩鈕重試,講大聲一點");
     return;
   }
   // Phase 2:STT
@@ -427,6 +440,7 @@ void stopRec() {
   if (text.length() == 0) {
     Serial.printf("[STT] 失敗 (%lu ms)\n", t1);
     tftStatus("辨識失敗", TFT_RED);
+    tftHint("按肩鈕重試");
     return;
   }
   Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
@@ -440,6 +454,7 @@ void stopRec() {
   if (llmJson.length() == 0) {
     Serial.printf("[LLM] 失敗 (%lu ms)\n", t3);
     tftStatus("解析失敗", TFT_RED);
+    tftHint("按肩鈕重試");
     return;
   }
   Serial.printf("[LLM] (%lu ms) %s\n", t3, llmJson.c_str());
@@ -449,6 +464,7 @@ void stopRec() {
   char buf[64];
   snprintf(buf, sizeof(buf), "→ %s", action.c_str());
   tftStatus(buf, TFT_GREEN);
+  tftHint("按肩鈕說下一句");
 }
 
 void setup() {
@@ -500,7 +516,8 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[+] WiFi OK,IP=%s,RSSI=%d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
-    tftStatus("就緒,按肩鈕說話", TFT_GREEN);
+    tftStatus("就緒", TFT_GREEN);
+    tftHint("按住肩鈕說話");
   } else {
     Serial.println("[X] WiFi 連線失敗");
     tftStatus("WiFi 失敗", TFT_RED);
