@@ -203,6 +203,24 @@ void doRecChunk() {
   }
 }
 
+// 確認 WiFi 連著,沒連就重連(最多等 8 秒)
+bool ensureWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return true;
+  Serial.println("[WiFi] 失聯,重連 ...");
+  tftStatus("WiFi 重連 ...", TFT_YELLOW);
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) delay(200);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[WiFi] 重連成功 RSSI=%d\n", WiFi.RSSI());
+    return true;
+  }
+  Serial.println("[WiFi] 重連失敗");
+  return false;
+}
+
 // 送 PCM 上 Groq Whisper,回傳辨識文字(失敗回空字串)
 String transcribeWithGroq() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -444,6 +462,11 @@ void stopRec() {
     return;
   }
   // Phase 2:STT
+  if (!ensureWiFi()) {
+    tftStatus("WiFi 失聯", TFT_RED);
+    tftHint("確認熱點開著再試");
+    return;
+  }
   tftStatus("上傳中...", TFT_YELLOW);
   unsigned long t0 = millis();
   String text = transcribeWithGroq();
@@ -517,7 +540,9 @@ void setup() {
   Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
   tftStatus("WiFi 連線中...", TFT_YELLOW);
   WiFi.mode(WIFI_STA);
-  // 新 Freenove + LD1117 雙軌架構,LDO 餘裕足,不再壓 2dBm。預設 19.5dBm 確保連線穩定
+  // 8.5dBm 折衷:範圍夠用,WiFi TX 尖峰電流不會打掛 buck 5V 軌
+  // (預設 19.5dBm 在 2S buck 架構下會偶爾重啟 / 連線失敗)
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long wt0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - wt0 < 15000) {
