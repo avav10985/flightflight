@@ -1,205 +1,115 @@
+// NES 顯示層 — LovyanGFX 版(flightflight 手把 V2-A)
+//
+// 原範例用 Arduino_GFX,在我們的板子上白畫面(init 不相容);
+// 改用手把主程式驗證過的 LovyanGFX ILI9341 配置(2026-06-12)。
+
 extern "C"
 {
 #include <nes/nes.h>
 }
 
 #include "hw_config.h"
+#include <LovyanGFX.hpp>
 
-#include <Arduino_GFX_Library.h>
-
-/* M5Stack */
-#if defined(ARDUINO_M5Stack_Core_ESP32) || defined(ARDUINO_M5STACK_FIRE)
-
-#define TFT_BRIGHTNESS 255 /* 0 - 255 */
-#define TFT_BL 32
-Arduino_DataBus *bus = new Arduino_ESP32SPI(27 /* DC */, 14 /* CS */, SCK, MOSI, MISO);
-Arduino_ILI9342 *gfx = new Arduino_ILI9342(bus, 33 /* RST */, 1 /* rotation */);
-
-/* Odroid-Go */
-#elif defined(ARDUINO_ODROID_ESP32)
-
-#define TFT_BRIGHTNESS 191 /* 0 - 255 */
-#define TFT_BL 14
-Arduino_DataBus *bus = new Arduino_ESP32SPI(21 /* DC */, 5 /* CS */, SCK, MOSI, MISO);
-Arduino_ILI9341 *gfx = new Arduino_ILI9341(bus, -1 /* RST */, 3 /* rotation */);
-
-/* TTGO T-Watch */
-#elif defined(ARDUINO_T) || defined(ARDUINO_TWATCH_BASE) || defined(ARDUINO_TWATCH_2020_V1) || defined(ARDUINO_TWATCH_2020_V2) // TTGO T-Watch
-
-#define TFT_BRIGHTNESS 255 /* 0 - 255 */
-#define TFT_BL 12
-Arduino_DataBus *bus = new Arduino_ESP32SPI(27 /* DC */, 5 /* CS */, 18 /* SCK */, 19 /* MOSI */, -1 /* MISO */);
-Arduino_ST7789 *gfx = new Arduino_ST7789(bus, -1 /* RST */, 1 /* rotation */, true /* IPS */, 240, 240, 0, 80);
-
-/* custom hardware */
-#else
-
-/* flightflight 手把 V2-A:ILI9341 on SPI2(SCK38 MOSI39 MISO40 CS48 DC21 RST16)
- * 背光直連 3V3 常亮,不定義 TFT_BL。rotation 3 = 橫向(顛倒就改 1) */
-Arduino_DataBus *bus = new Arduino_ESP32SPI(21 /* DC */, 48 /* CS */, 38 /* SCK */, 39 /* MOSI */, 40 /* MISO */);
-Arduino_TFT *gfx = new Arduino_ILI9341(bus, 16 /* RST */, 3 /* rotation */);
-
-#define _OLD_CUSTOM_SECTION_DISABLED_
-#ifdef _NEVER_DEFINED_
-#define TFT_BRIGHTNESS 128 /* 0 - 255 */
-
-/* HX8357B */
-// #define TFT_BL 27
-// Arduino_DataBus *bus = new Arduino_ESP32SPI(-1 /* DC */, 5 /* CS */, 18 /* SCK */, 23 /* MOSI */, -1 /* MISO */);
-// Arduino_TFT *gfx = new Arduino_HX8357B(bus, 33, 3 /* rotation */, true /* IPS */);
-
-/* ST7789 ODROID Compatible pin connection */
-// #define TFT_BL 14
-// Arduino_DataBus *bus = new Arduino_ESP32SPI(21 /* DC */, 5 /* CS */, SCK, MOSI, MISO);
-// Arduino_ST7789 *gfx = new Arduino_ST7789(bus, -1 /* RST */, 1 /* rotation */, true /* IPS */);
-
-/* ST7796 on breadboard */
-// #define TFT_BL 32
-Arduino_DataBus *bus_unused = new Arduino_ESP32SPI(32 /* DC */, -1 /* CS */, 25 /* SCK */, 33 /* MOSI */, -1 /* MISO */);
-Arduino_TFT *gfx_unused = new Arduino_ST7796(bus_unused, -1 /* RST */, 1 /* rotation */);
-
-/* ST7796 on LCDKit */
-// #define TFT_BL 23
-// Arduino_DataBus *bus = new Arduino_ESP32SPI(19 /* DC */, 5 /* CS */, 22 /* SCK */, 21 /* MOSI */, -1 /* MISO */);
-// Arduino_ST7796 *gfx = new Arduino_ST7796(bus, 18, 1 /* rotation */);
-#endif /* _NEVER_DEFINED_ */
-
-#endif /* custom hardware */
+// ====== 手把 TFT(同 Ground_TX_ESP32 配置)======
+class LGFX : public lgfx::LGFX_Device {
+  lgfx::Bus_SPI       _bus_instance;
+  lgfx::Panel_ILI9341 _panel_instance;
+public:
+  LGFX() {
+    {
+      auto cfg = _bus_instance.config();
+      cfg.spi_host    = SPI2_HOST;
+      cfg.spi_mode    = 0;
+      cfg.freq_write  = 40000000;
+      cfg.freq_read   = 16000000;
+      cfg.pin_sclk    = 38;
+      cfg.pin_mosi    = 39;
+      cfg.pin_miso    = 40;
+      cfg.pin_dc      = 21;
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+    {
+      auto cfg = _panel_instance.config();
+      cfg.pin_cs        = 48;
+      cfg.pin_rst       = 16;
+      cfg.pin_busy      = -1;
+      cfg.memory_width  = 240;
+      cfg.memory_height = 320;
+      cfg.panel_width   = 240;
+      cfg.panel_height  = 320;
+      cfg.readable      = false;
+      cfg.invert        = false;
+      cfg.rgb_order     = false;
+      cfg.dlen_16bit    = false;
+      cfg.bus_shared    = false;   // NES_Test 獨佔 SPI2(SD 在 SPI3)
+      _panel_instance.config(cfg);
+    }
+    setPanel(&_panel_instance);
+  }
+};
+static LGFX tft;
 
 static int16_t w, h, frame_x, frame_y, frame_x_offset, frame_width, frame_height, frame_line_pixels;
 extern int16_t bg_color;
 extern uint16_t myPalette[];
 
+static uint16_t lineBuf[NES_SCREEN_WIDTH];
+
 extern void display_begin()
 {
-    gfx->begin();
-    bg_color = gfx->color565(24, 28, 24); // DARK DARK GREY
-    gfx->fillScreen(bg_color);
+    tft.init();
+    tft.setRotation(3);   // 橫向 320×240(畫面顛倒就改 1)
+    bg_color = tft.color565(24, 28, 24);
+    tft.fillScreen(bg_color);
+}
 
-#ifdef TFT_BL
-    // turn display backlight on
-    ledcSetup(1, 12000, 8);       // 12 kHz PWM, 8-bit resolution
-    ledcAttachPin(TFT_BL, 1);     // assign TFT_BL pin to channel 1
-    ledcWrite(1, TFT_BRIGHTNESS); // brightness 0 - 255
-#endif
+extern void display_message(const char *msg)
+{
+    tft.setTextColor(TFT_ORANGE, bg_color);
+    tft.setTextSize(2);
+    tft.setCursor(8, 100);
+    tft.println(msg);
 }
 
 extern "C" void display_init()
 {
-    w = gfx->width();
-    h = gfx->height();
-    if (w < 480) // assume only 240x240 or 320x240
+    w = tft.width();    // rotation 3 → 320
+    h = tft.height();   //              240
+    if (w > NES_SCREEN_WIDTH)
     {
-        if (w > NES_SCREEN_WIDTH)
-        {
-            frame_x = (w - NES_SCREEN_WIDTH) / 2;
-            frame_x_offset = 0;
-            frame_width = NES_SCREEN_WIDTH;
-            frame_height = NES_SCREEN_HEIGHT;
-            frame_line_pixels = frame_width;
-        }
-        else
-        {
-            frame_x = 0;
-            frame_x_offset = (NES_SCREEN_WIDTH - w) / 2;
-            frame_width = w;
-            frame_height = NES_SCREEN_HEIGHT;
-            frame_line_pixels = frame_width;
-        }
-        frame_y = (gfx->height() - NES_SCREEN_HEIGHT) / 2;
+        frame_x = (w - NES_SCREEN_WIDTH) / 2;
+        frame_x_offset = 0;
+        frame_width = NES_SCREEN_WIDTH;
     }
-    else // assume 480x320
+    else
     {
         frame_x = 0;
-        frame_y = 0;
-        frame_x_offset = 8;
+        frame_x_offset = (NES_SCREEN_WIDTH - w) / 2;
         frame_width = w;
-        frame_height = h;
-        frame_line_pixels = frame_width / 2;
     }
+    frame_height = NES_SCREEN_HEIGHT;
+    frame_line_pixels = frame_width;
+    frame_y = (h - NES_SCREEN_HEIGHT) / 2;
+    if (frame_y < 0) frame_y = 0;
 }
 
 extern "C" void display_write_frame(const uint8_t *data[])
 {
-    gfx->startWrite();
-    if (w < 480)
+    tft.startWrite();
+    tft.setAddrWindow(frame_x, frame_y, frame_width, frame_height);
+    for (int32_t i = 0; i < NES_SCREEN_HEIGHT; i++)
     {
-        gfx->writeAddrWindow(frame_x, frame_y, frame_width, frame_height);
-        for (int32_t i = 0; i < NES_SCREEN_HEIGHT; i++)
-        {
-            gfx->writeIndexedPixels((uint8_t *)(data[i] + frame_x_offset), myPalette, frame_line_pixels);
-        }
+        const uint8_t *src = data[i] + frame_x_offset;
+        for (int32_t x = 0; x < frame_line_pixels; x++)
+            lineBuf[x] = myPalette[src[x]];
+        tft.writePixels(lineBuf, frame_line_pixels, true);
     }
-    else
-    {
-        /* ST7796 480 x 320 resolution */
-
-        /* Option 1:
-         * crop 256 x 240 to 240 x 214
-         * then scale up width x 2 and scale up height x 1.5
-         * repeat a line for every 2 lines
-         */
-        // gfx->writeAddrWindow(frame_x, frame_y, frame_width, frame_height);
-        // for (int16_t i = 10; i < (10 + 214); i++)
-        // {
-        //     gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-        //     if ((i % 2) == 1)
-        //     {
-        //         gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-        //     }
-        // }
-
-        /* Option 2:
-         * crop 256 x 240 to 240 x 214
-         * then scale up width x 2 and scale up height x 1.5
-         * simply blank a line for every 2 lines
-         */
-        int16_t y = 0;
-        for (int16_t i = 10; i < (10 + 214); i++)
-        {
-            gfx->writeAddrWindow(frame_x, y++, frame_width, 1);
-            gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-            if ((i % 2) == 1)
-            {
-                y++; // blank line
-            }
-        }
-
-        /* Option 3:
-         * crop 256 x 240 to 240 x 240
-         * then scale up width x 2 and scale up height x 1.33
-         * repeat a line for every 3 lines
-         */
-        // gfx->writeAddrWindow(frame_x, frame_y, frame_width, frame_height);
-        // for (int16_t i = 0; i < 240; i++)
-        // {
-        //     gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-        //     if ((i % 3) == 1)
-        //     {
-        //         gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-        //     }
-        // }
-
-        /* Option 4:
-         * crop 256 x 240 to 240 x 240
-         * then scale up width x 2 and scale up height x 1.33
-         * simply blank a line for every 3 lines
-         */
-        // int16_t y = 0;
-        // for (int16_t i = 0; i < 240; i++)
-        // {
-        //     gfx->writeAddrWindow(frame_x, y++, frame_width, 1);
-        //     gfx->writeIndexedPixelsDouble((uint8_t *)(data[i] + 8), myPalette, frame_line_pixels);
-        //     if ((i % 3) == 1)
-        //     {
-        //         y++; // blank line
-        //     }
-        // }
-    }
-    gfx->endWrite();
+    tft.endWrite();
 }
 
 extern "C" void display_clear()
 {
-    gfx->fillScreen(bg_color);
+    tft.fillScreen(bg_color);
 }

@@ -21,7 +21,6 @@
 #include <esp_task_wdt.h>
 #include <SPI.h>
 #include <SD.h>
-#include <Arduino_GFX_Library.h>
 #include "hw_config.h"
 
 extern "C"
@@ -32,8 +31,8 @@ extern "C"
 SPIClass spiSD(HSPI);   // SD 獨立 SPI3(同 Ground_TX:SCK15 MISO47 MOSI17 CS0)
 
 int16_t bg_color;
-extern Arduino_TFT *gfx;
 extern void display_begin();
+extern void display_message(const char *msg);
 
 void setup()
 {
@@ -55,7 +54,7 @@ void setup()
   if (!SD.begin(0, spiSD, 20000000, FSROOT))
   {
     Serial.println("SD 掛載失敗");
-    gfx->println("SD mount failed!");
+    display_message("SD mount failed!");
     while (1) delay(1000);
   }
   FS filesystem = SD;
@@ -90,7 +89,7 @@ void setup()
   if (!foundRom)
   {
     Serial.println("SD 根目錄找不到 .nes ROM");
-    gfx->println("No .nes ROM on SD root!");
+    display_message("No .nes ROM on SD root!");
     while (1) delay(1000);
   }
 
