@@ -31,6 +31,7 @@
 #include <SPI.h>
 #include <RF24.h>
 #include <SD.h>
+#include <driver/i2s_std.h>   // 音樂播放 I²S TX(ENABLE_MUSIC)
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
@@ -114,7 +115,7 @@ LGFX tft;
 // 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**
 #define ENABLE_PC_MODE11        0   // Mode 11:PC 透過 USB Serial 控制飛機(透明橋接)
 #define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
-#define ENABLE_MUSIC            0   // 任意 mode 都可放音樂(需 SD + MAX98357A)
+#define ENABLE_MUSIC            1   // 任意 mode 都可放音樂(需 SD + MAX98357A,2026-06-12 開)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
 #define ENABLE_SD               1   // SD 卡模組:1 = 啟用(2026-06-11 新電源架構後重測。
                                     // 2026-06-09 曾因模組 level shifter 搶 SPI bus 拖爆 NRF24 停用;
@@ -219,8 +220,13 @@ Param params[] = {
   { "保存PID",  0.0f,  1.0f,   102, true  },
   { "快速校準",  0.0f,  1.0f,   100, true  },
   { "完整校準",  0.0f,  1.0f,   101, true  },
+  { "音樂",     0.0f,  1.0f,   200, true  },   // id 200 = 本地動作,不送飛機
 };
-const int N_PARAM = 8;
+const int N_PARAM = 9;
+
+#if ENABLE_MUSIC
+void musicToggle();   // 前置宣告,實作在音樂區塊
+#endif
 int menuCursor = 0;
 
 unsigned long lastDrawTime = 0;
@@ -295,6 +301,9 @@ void handleMenuButton(int btn) {
   if (p.isAction) {
     // 動作項目:只認 OK,每按一次 paramVal +1 當 pulse,飛機看 val 變才會做
     if (btn == BTN_OK) {
+#if ENABLE_MUSIC
+      if (p.id == 200) { musicToggle(); return; }   // 本地動作,不送飛機
+#endif
       p.val += 1.0f;
       data.paramID  = p.id;
       data.paramVal = p.val;
@@ -454,9 +463,9 @@ void drawMenuStatic() {
 void drawMenuDynamic() {
   // 只重畫狀態變過的列(cursor 跳走 / 值改了),避免閃爍
   static int   lastCursor = -1;
-  static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999, -999, -999, -999 };
+  static float lastVal[N_PARAM] = { -999, -999, -999, -999, -999, -999, -999, -999, -999 };
   char buf[24];
-  const int rowH = 30;     // 8 列要塞進 240 px,壓低行高
+  const int rowH = 26;     // 9 列要塞進 40~280 px(9×26=234),行高再壓低
 
   for (int i = 0; i < N_PARAM; i++) {
     bool sel    = (i == menuCursor);
@@ -470,10 +479,10 @@ void drawMenuDynamic() {
       tft.fillRect(0, y, 240, rowH, bg);
       tft.setFont(&fonts::efontTW_24);
       tft.setTextColor(fg, bg);
-      tft.setCursor(10, y + 3);
+      tft.setCursor(10, y + 1);
       tft.print(sel ? ">" : " ");
       tft.print(params[i].name);
-      tft.setCursor(160, y + 3);
+      tft.setCursor(160, y + 1);
       if (params[i].isAction) {
         tft.print("GO");
       } else {
@@ -560,6 +569,14 @@ void setup() {
   sdOK = false;
 #endif
 
+  // MAX98357A SD 腳:開機立刻拉低靜音(浮空會放大 I²S 雜訊,memory 老坑)
+  pinMode(PIN_AMP_SD, OUTPUT);
+  digitalWrite(PIN_AMP_SD, LOW);
+#if ENABLE_MUSIC
+  initMusicI2S();
+  Serial.println("[+] 音樂 I²S 就緒(選單→音樂 播放/停止)");
+#endif
+
   // TFT(SD 之後 init,共用 SPI bus_shared 模式)
   tft.init();
   tft.setRotation(2);   // 240×320 portrait 翻 180°
@@ -635,6 +652,10 @@ void loop() {
   }
 
   readInputs(mode);
+
+#if ENABLE_MUSIC
+  musicUpdate();   // 非阻塞餵 I²S,DMA 滿了立刻返回
+#endif
 
   // 送指令 + 收遙測(ACK payload)
   // Debug:每秒印一次 TX 統計,看到底有沒有送出去 + 飛機有沒有 ACK 回來
@@ -814,23 +835,91 @@ File     musicFile;
 bool     musicPlaying = false;
 uint8_t  musicVolume  = 60;     // 0~100
 
+#define MUSIC_SAMPLE_RATE 32000  // WAV 需轉成 32kHz / 單聲道 / 16-bit PCM
+i2s_chan_handle_t musicTx = nullptr;
+
+// I²S TX 初始化(沿用 Play_Test 驗證過的設定)
+void initMusicI2S() {
+  i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  chan_cfg.dma_desc_num  = 8;       // 大 DMA buffer:SD 讀取慢時不 underrun
+  chan_cfg.dma_frame_num = 512;
+  i2s_new_channel(&chan_cfg, &musicTx, NULL);
+
+  i2s_std_config_t std_cfg = {};
+  std_cfg.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(MUSIC_SAMPLE_RATE);
+  std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
+  std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+  std_cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
+  std_cfg.gpio_cfg.bclk = (gpio_num_t)PIN_I2S_BCLK;
+  std_cfg.gpio_cfg.ws   = (gpio_num_t)PIN_I2S_WS;
+  std_cfg.gpio_cfg.dout = (gpio_num_t)PIN_I2S_DOUT;
+  std_cfg.gpio_cfg.din  = I2S_GPIO_UNUSED;
+  i2s_channel_init_std_mode(musicTx, &std_cfg);
+  i2s_channel_enable(musicTx);
+
+  // 預灌 silence 讓 MAX98357A 醒來看到穩定 0 訊號(boot pop 消除)
+  int32_t silence[256] = {0};
+  size_t w = 0;
+  for (int i = 0; i < 4; i++)
+    i2s_channel_write(musicTx, silence, sizeof(silence), &w, 50 / portTICK_PERIOD_MS);
+}
+
 void musicPlay(const char* path) {
   if (musicPlaying) { musicFile.close(); }
   musicFile = SD.open(path, FILE_READ);
   if (!musicFile) { Serial.printf("[!] 開不了 %s\n", path); return; }
   musicFile.seek(44);   // 跳 WAV header
   musicPlaying = true;
+  digitalWrite(PIN_AMP_SD, HIGH);   // 開擴大機
   Serial.printf("[+] 播放 %s\n", path);
 }
 
 void musicStop() {
   if (musicPlaying) { musicFile.close(); musicPlaying = false; }
+  digitalWrite(PIN_AMP_SD, LOW);    // 關擴大機(靜音 + 消雜訊)
 }
 
+// 每迴圈呼叫:非阻塞地把 SD 資料餵進 I²S DMA。
+// timeout 0:DMA 滿了就立刻返回,絕不卡住 50Hz 控制迴圈。
 void musicUpdate() {
   if (!musicPlaying) return;
-  // TODO:讀一塊 SD chunk → 套音量 → 寫 I²S
-  // 若播完(file.available()==0)→ musicStop()
+  static uint8_t pcm[512];
+  static int32_t tx[256];
+  for (int round = 0; round < 4; round++) {     // 每迴圈最多餵 1024 samples(32ms 音訊)
+    int n = musicFile.read(pcm, sizeof(pcm));
+    if (n <= 0) {                                // 播完
+      Serial.println("[+] 音樂播畢");
+      musicStop();
+      return;
+    }
+    int samples = n / 2;
+    int16_t* s = (int16_t*)pcm;
+    for (int i = 0; i < samples; i++)
+      tx[i] = ((int32_t)(s[i] * musicVolume / 100)) << 16;
+    size_t written = 0;
+    i2s_channel_write(musicTx, tx, samples * 4, &written, 0);   // 非阻塞
+    size_t consumedPcm = written / 2;            // tx bytes 是 pcm bytes 的 2 倍
+    if ((int)consumedPcm < n) {
+      // DMA 滿:把沒寫進去的部分倒帶,下迴圈再餵
+      musicFile.seek(musicFile.position() - (n - consumedPcm));
+      return;
+    }
+  }
+}
+
+// 選單「音樂」項目:播放 ⇄ 停止
+void musicToggle() {
+  if (musicPlaying) { musicStop(); return; }
+  if (!sdOK) { Serial.println("[!] SD 沒掛載,不能放音樂"); return; }
+  // 先找 /music/ 第一首,沒有就退回根目錄 REC_001.WAV
+  String list[1];
+  extern int musicListFiles(String list[], int maxN);
+  if (musicListFiles(list, 1) > 0) {
+    String path = String("/music/") + list[0];
+    musicPlay(path.c_str());
+  } else {
+    musicPlay("/REC_001.WAV");
+  }
 }
 
 // 列出 SD /music/ 資料夾的所有 .WAV 檔(常駐選單呼叫)
