@@ -102,11 +102,13 @@ LGFX tft;
 #define PIN_SPI_MISO 40
 // SD 卡:獨立第二組 SPI(SPI3/HSPI),跟 NRF24/TFT 的 bus 完全分開。
 // 2026-06-12 實測:SD 模組 level shifter 在共用 bus 上不放開 MISO,
-// 連新電源架構也救不了 → 搬到專用腳位,讓它佔自己的線
-#define PIN_SD_CS   47   // SD CS(沿用)
+// 連新電源架構也救不了 → 搬到專用腳位,讓它佔自己的線。
+// MISO 曾誤選 GPIO 3(接線總表標「避開」,實測也失敗),改用 47;
+// CS 回歸接線總表原始設計 GPIO 0(BOOT 腳輸出閒置 HIGH 安全,R11 上拉)
+#define PIN_SD_CS    0   // SD CS(原始設計,R11 10k 上拉)
 #define PIN_SD_SCK  15   // SD 專用 SCK(真正釋出腳)
 #define PIN_SD_MOSI 17   // SD 專用 MOSI(真正釋出腳)
-#define PIN_SD_MISO  3   // SD 專用 MISO(JTAG 選擇腳,平常無作用)
+#define PIN_SD_MISO 47   // SD 專用 MISO(原 CS 腳讓出來)
 
 // ====== V2-B 跟其他 feature 旗標(2026-06-06)======
 // 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**

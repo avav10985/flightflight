@@ -9,8 +9,8 @@
 //   GND → 共地
 //   SCK  → GPIO 15
 //   MOSI → GPIO 17
-//   MISO → GPIO 3
-//   CS   → GPIO 47
+//   MISO → GPIO 47(2026-06-12 改:GPIO 3 是接線總表標記「避開」的腳,我選錯了)
+//   CS   → GPIO 0 (BOOT 腳,輸出閒置 HIGH 安全;C 板 R11 10k 上拉本來就是為它準備的)
 //
 // === 操作 ===
 //   拔電池 → USB 燒錄 → 拔 USB → 接電池
@@ -21,10 +21,10 @@
 #include <SD.h>
 #include <LovyanGFX.hpp>
 
-#define PIN_SD_CS    47
+#define PIN_SD_CS     0
 #define PIN_SD_SCK   15
 #define PIN_SD_MOSI  17
-#define PIN_SD_MISO   3
+#define PIN_SD_MISO  47
 
 SPIClass spiSD(HSPI);   // S3 第二組 SPI(SPI3)
 
@@ -106,7 +106,7 @@ void setup() {
   tft.setFont(&fonts::efontTW_16);
 
   show("=== SD 測試(獨立 SPI3)===", TFT_CYAN);
-  show("SCK15 MOSI17 MISO3 CS47");
+  show("SCK15 MOSI17 MISO47 CS0");
 
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
@@ -115,7 +115,7 @@ void setup() {
   bool ok = tryMount(4000000) || tryMount(1000000) || tryMount(400000);
   if (!ok) {
     show("全部失敗,檢查:", TFT_RED);
-    show("1. 六條線接對接穩?");
+    show("1. SCK15 MOSI17 MISO47 CS0");
     show("2. 卡插到底?FAT32?");
     show("3. 換一張卡試試");
     return;
