@@ -33,7 +33,7 @@
     <tr><td>MPU-6050 模組</td><td>姿態量測</td><td>六軸一體、I²C 介面、資源豐富,適合自寫姿態解算入門</td></tr>
     <tr><td>nRF24L01+ 模組</td><td>控制鏈路</td><td>相較 WiFi:延遲低且固定、協定簡單、支援 ACK payload 雙向傳輸,適合 50 Hz 即時控制</td></tr>
     <tr><td>空心杯馬達 + MOSFET</td><td>動力</td><td>小型機架重量輕,空心杯免電調(ESC),以 MOSFET PWM 直驅降低成本與複雜度</td></tr>
-    <tr><td>2.4" ILI9341 TFT(SPI)</td><td>地面站顯示</td><td>SPI 介面僅需 6 隻 GPIO(並列式需 13+);LovyanGFX 支援中文字型</td></tr>
+    <tr><td>2.8" MSP2806 TFT(SPI ILI9341)</td><td>地面站顯示</td><td>SPI 介面僅需 6 隻 GPIO(並列式需 13+);LovyanGFX 支援中文字型</td></tr>
     <tr><td>INMP441 / MAX98357A</td><td>語音輸入 / 輸出</td><td>全數位 I²S 介面,避開板上類比雜訊;兩者可共用時脈線省腳位</td></tr>
     <tr><td>LD1117 穩壓器 + 100 µF</td><td>周邊獨立電源軌</td><td>1 A 容量、低壓差;與板載穩壓器分軌隔離射頻電流尖峰(§B.1)</td></tr>
   </table></div>
@@ -129,7 +129,7 @@
 </section>
 
 <section>
-  <h2><span class="no">B.3</span>飛行控制器腳位配置(ESP32)</h2>
+  <h2><span class="no">B.3</span>飛行控制器腳位配置(LOLIN D32)</h2>
   <div class="table-scroll"><table>
     <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
     <tr><td rowspan="2">無線通訊</td><td>nRF24 CE / CSN</td><td><code>4</code> / <code>5</code></td><td rowspan="2">VSPI(SCK 18 / MISO 19 / MOSI 23)</td></tr>

@@ -34,7 +34,7 @@
   <p>本專案自零開始設計並實作一套完整的四軸無人機系統,不採用任何現成飛控板或遙控器,涵蓋三個子系統:</p>
   <ul>
     <li><b>飛行控制器</b>:以 ESP32 為核心,自行實作慣性量測融合(互補濾波)、三軸 PID 姿態控制、X 型四馬達混控,並整合 GPS、氣壓計、磁力計與雷射測距感測器。</li>
-    <li><b>地面站(手把)</b>:以 ESP32-S3 為核心,2.4 吋彩色 TFT 全中文操作介面,雙搖桿 + 9 種飛行模式,經 nRF24L01+ 與飛行控制器進行 50 Hz 雙向通訊(指令下行 / 遙測上行),支援線上 PID 調參與遠端校準。</li>
+    <li><b>地面站(手把)</b>:以 ESP32-S3 為核心,2.8 吋彩色 TFT 全中文操作介面,雙搖桿 + 9 種飛行模式,經 nRF24L01+ 與飛行控制器進行 50 Hz 雙向通訊(指令下行 / 遙測上行),支援線上 PID 調參與遠端校準。</li>
     <li><b>AI 語音控制子系統(Mode 10)</b>:地面站內建 I²S 麥克風,按住肩鈕錄音後經 WiFi 上傳雲端,以 Whisper 模型進行中文語音辨識,再由大型語言模型解析為結構化飛行指令(JSON),全程延遲約 3 秒。</li>
   </ul>
   <p>開發過程採對照實驗方法定位多項系統級問題,包括穩壓器容量不足導致之 WiFi 欠壓重啟、SPI 匯流排佔用衝突、射頻發射電流尖峰等,並完成雙穩壓器電源架構之重新設計。本報告依主題分章,記錄系統之完整技術規格、設計決策與驗證結果。</p>
@@ -61,7 +61,7 @@
   <h3>3.1 飛行控制器(機載)</h3>
   <div class="table-scroll"><table>
     <tr><th style="width:32%">項目</th><th>規格</th></tr>
-    <tr><td>主控制器</td><td><b>ESP32(雙核心 Xtensa LX6 @ 240 MHz)</b>,38-pin 開發板</td></tr>
+    <tr><td>主控制器</td><td><b>LOLIN D32(ESP32-WROOM-32,雙核心 Xtensa LX6 @ 240 MHz)</b></td></tr>
     <tr><td>慣性量測單元</td><td>InvenSense <b>MPU-6050</b>(三軸陀螺儀 + 三軸加速度計,I²C @ 100 kHz)</td></tr>
     <tr><td>衛星定位</td><td>u-blox <b>NEO-6M</b>(GY-NEO6MV2,UART @ 9600 bps,NMEA)</td></tr>
     <tr><td>氣壓高度計</td><td>Bosch <b>BMP280</b>(I²C 0x76,相對高度估計)</td></tr>
@@ -76,7 +76,7 @@
   <div class="table-scroll"><table>
     <tr><th style="width:32%">項目</th><th>規格</th></tr>
     <tr><td>主控制器</td><td><b>ESP32-S3 N16R8</b>(雙核心 LX7 @ 240 MHz,16 MB Flash,8 MB Octal PSRAM)</td></tr>
-    <tr><td>顯示器</td><td>2.4" TFT <b>ILI9341</b> 240×320(SPI @ 40 MHz,LovyanGFX,中文字型)</td></tr>
+    <tr><td>顯示器</td><td>2.8" TFT <b>MSP2806(ILI9341)</b> 240×320(SPI @ 40 MHz,LovyanGFX,中文字型)</td></tr>
     <tr><td>操縱輸入</td><td>雙軸搖桿 × 2(油門軸移除回中彈簧)、三段開關 × 2、肩鈕 × 2、選單鍵</td></tr>
     <tr><td>語音輸入</td><td><b>INMP441</b> I²S MEMS 麥克風(16 kHz / 16-bit / 單聲道)</td></tr>
     <tr><td>語音輸出</td><td><b>MAX98357A</b> I²S Class-D 擴大機(預留 TTS 語音回覆)</td></tr>

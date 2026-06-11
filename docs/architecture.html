@@ -46,7 +46,7 @@
 
     <div class="arch-col col-drone">
       <h4>飛行控制器(機載)</h4>
-      <div class="node" data-k="fc">ESP32 飛控主程式 <small>濾波・PID・混控・導航狀態機</small></div>
+      <div class="node" data-k="fc">LOLIN D32 飛控主程式 <small>ESP32・濾波・PID・混控・導航狀態機</small></div>
       <div class="node" data-k="imu">MPU-6050 IMU <small>I²C・姿態量測來源</small></div>
       <div class="node" data-k="gps">NEO-6M GPS <small>UART・定位與導航</small></div>
       <div class="node" data-k="baro">BMP280 / VL53L0X ×2 <small>氣壓定高・雷射近距(預留)</small></div>
@@ -67,7 +67,26 @@
   <h2><span class="no">A.2</span>程式架構</h2>
 
   <h3>A.2.1 程式組織策略</h3>
-  <p>專案採「<b>主程式 + 單元測試程式</b>」雙層結構:兩支主程式(<code>Drone_FC_Full</code> 飛行控制器、<code>Ground_TX_ESP32</code> 地面站)承載完整功能;另維護 28 支獨立可燒錄的單元測試程式,每個子系統(IMU、GPS、TFT、I²S 音訊、WiFi、NRF24⋯)均有對應之最小化驗證程式。系統級問題發生時,可立即降階至單元程式重現,大幅縮小問題定位範圍 —— 本專案多數硬體問題(如穩壓器容量不足)均以此方法確診。</p>
+  <p>專案採「<b>主程式 + 單元測試程式</b>」雙層結構:兩支主程式承載完整功能;另維護 28 支獨立可燒錄的單元測試程式,每個子系統均有對應之最小化驗證程式。系統級問題發生時,可立即降階至單元程式重現,大幅縮小問題定位範圍 —— 本專案多數硬體問題(如穩壓器容量不足)均以此方法確診。整體結構如下:</p>
+
+  <div class="codeblock">flightflight/
+├── <span class="fn">Drone_FC_Full/</span>            <span class="cm">飛行控制器主程式(LOLIN D32)</span>
+│   ├── 通訊模組               <span class="cm">recvData / buildTelemetry / applyCommand(線上調參)</span>
+│   ├── 安全模組               <span class="cm">checkArm(四層武裝鏈)/ failsafe / disarm</span>
+│   ├── 姿態模組               <span class="cm">readAttitude(互補濾波)+ 磁力計航向融合</span>
+│   ├── 控制模組               <span class="cm">pidControl(三軸 PID + X 型混控)</span>
+│   ├── 校準模組               <span class="cm">快速 / 完整校準・動作偵測・懸停自學習・NVS 持久化</span>
+│   └── 導航模組               <span class="cm">navigateMode02(GPS 狀態機,待接 PID)</span>
+├── <span class="fn">Ground_TX_ESP32/</span>          <span class="cm">地面站主程式(ESP32-S3)</span>
+│   ├── 輸入模組               <span class="cm">搖桿 ADC(反相校正)・三段開關・按鈕</span>
+│   ├── 通訊模組               <span class="cm">50 Hz Signal 發送・ACK 遙測接收</span>
+│   ├── 介面模組               <span class="cm">飛行畫面 / PID 選單(dirty-flag 重繪)</span>
+│   └── Mode 10 模組           <span class="cm">I²S 錄音・雲端辨識(整合中)</span>
+├── <span class="fn">ESP32CAM_Flight/</span>          <span class="cm">FPV 影像節點(獨立 MCU)</span>
+├── <span class="fn">Mode10_Test/</span>              <span class="cm">語音管線獨立驗證程式</span>
+├── <span class="fn">WiFi_Min_Test/ GPS_Test/ …</span> <span class="cm">28 支單元測試程式(每個子系統一支)</span>
+├── 接線總表 / 程式說明        <span class="cm">設計文件(先行設計、實作後回寫)</span>
+└── make_*.py                  <span class="cm">設計圖產生腳本(Python)</span></div>
 
   <h3>A.2.2 飛行控制器主迴圈(50 Hz)</h3>
   <div class="diagram">
@@ -182,7 +201,7 @@ const ARCH_INFO = {
     "操作限制:USB 與電池嚴禁同時連接 —— 兩穩壓器輸出並聯將產生反向灌流,可能損壞 USB 主機。"],
   cloud: ["雲端推論服務(Mode 10)",
     "TLS 連線上傳 WAV 至 Whisper large-v3-turbo 進行中文語音辨識,轉錄文字再經 Llama-3.3-70B(few-shot + JSON 強制輸出)解析為結構化飛行指令。端到端延遲約 3 秒。詳見語音子系統章。", ""],
-  fc: ["飛行控制主程式(ESP32)",
+  fc: ["飛行控制主程式(LOLIN D32,ESP32-WROOM-32)",
     "主迴圈:IMU 讀取 → 互補濾波姿態解算 → 角度環 PID → X 型混控 → PWM 輸出,並行處理 nRF24 收發、GPS NMEA 解析、遙測組包與導航狀態機(圖 A-1)。",
     "驗證策略:Gyro / Manual / PID 三階段獨立程式逐層驗證。"],
   imu: ["MPU-6050 慣性量測單元",
@@ -196,7 +215,7 @@ const ARCH_INFO = {
     "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
   motor: ["動力輸出(空心杯馬達 × 4)",
     "MOSFET PWM 直驅,X 型配置混控,輸出限幅 [1000, 2000]。",
-    "調校紀錄:初始 PID 增益過高導致響應過敏,經實飛測試降至保守值並限制最大傾角 20°。"],
+    "調校紀錄:初始 PID 增益過高導致響應過於靈敏,經實飛測試降至保守值並限制最大傾角 20°。"],
   cam: ["ESP32-CAM 影像節點",
     "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援飛行中調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
 };
