@@ -1,150 +1,96 @@
 // ============================================================
-// SD_Test — 純粹單獨測 SD 卡模組能不能掛載
+// SD_Test — 單獨測 SD 卡(獨立 SPI3 新腳位版,2026-06-12)
 //
-// 沒有 TFT、沒有 I²S、沒有 NRF24,**只測 SD**。
+// 沒有 TFT、沒有 I²S、沒有 NRF24,只測 SD。用 USB + Serial。
 //
 // === 接線(6 條)===
-//   SD 模組 VCC  → ESP32 3V3
-//   SD 模組 GND  → ESP32 GND
-//   SD 模組 MOSI → ESP32 GPIO 39
-//   SD 模組 MISO → ESP32 GPIO 40
-//   SD 模組 SCK  → ESP32 GPIO 38
-//   SD 模組 CS   → ESP32 GPIO 0
+//   SD 模組 VCC  → ESP32-S3 板上的 5V 腳(⚠ 測試期間暫時改接這裡!)
+//   SD 模組 GND  → GND
+//   SD 模組 SCK  → GPIO 15
+//   SD 模組 MOSI → GPIO 17
+//   SD 模組 MISO → GPIO 3
+//   SD 模組 CS   → GPIO 47
 //
-// === ⚠️ 重要:GPIO 0 必須有上拉 ===
-//   方法 1(正式):10kΩ 電阻接 GPIO 0 跟 3V3 之間
-//   方法 2(臨時):直接用杜邦線把 GPIO 0 跟 3V3 短接
+// === ⚠ 為什麼 VCC 要暫時改接板上 5V 腳 ===
+//   平常 SD VCC 接 buck 5V 軌,但那條軌只有「電池模式」才有電。
+//   這支測試要用 USB 看 Serial(電池要拔),所以 SD 改吃
+//   板上 5V 腳(USB 進來的 5V)。測完整合時再接回 buck 軌。
 //
-//   沒上拉的話 ESP32 開機可能進燒錄模式或 SD 不認得。
-//
-// === 預期 Serial 輸出 ===
-//   === SD 卡測試 ===
-//   [+] SD 掛載成功
-//   [+] 卡類型:SDHC
-//   [+] 容量:15.0 GB
-//   [+] 已用空間:0 MB / 15330 MB
-//   [+] 根目錄檔案清單:
-//       (沒檔案就什麼也不印)
-//
-// === 如果失敗 ===
-//   [!] SD 掛載失敗
-//   → 檢查接線、R11、SD 卡有沒有真的插進模組、卡有沒有壞
+// === 操作 ===
+//   拔電池 → SD VCC 改接板上 5V → USB 燒錄 → 開 Serial Monitor 115200
+//   會自動用 4MHz → 1MHz → 400kHz 三種速度嘗試掛載
 // ============================================================
 
 #include <SPI.h>
 #include <SD.h>
 
-// CS = GPIO 47(右側自由腳,不用上拉電阻,接線方便)
-// 如果要用 GPIO 0(BOOT 腳)需要 R11 10kΩ 上拉到 3V3,否則進燒錄模式
 #define PIN_SD_CS    47
-#define PIN_SPI_SCK  38
-#define PIN_SPI_MOSI 39
-#define PIN_SPI_MISO 40
+#define PIN_SD_SCK   15
+#define PIN_SD_MOSI  17
+#define PIN_SD_MISO   3
+
+SPIClass spiSD(HSPI);   // S3 第二組 SPI(SPI3)
+
+bool tryMount(uint32_t freq) {
+  Serial.printf("[*] 嘗試掛載 @ %lu kHz ... ", freq / 1000);
+  if (SD.begin(PIN_SD_CS, spiSD, freq)) {
+    Serial.println("成功!");
+    return true;
+  }
+  Serial.println("失敗");
+  SD.end();
+  return false;
+}
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
-  Serial.println("\n========================================");
-  Serial.println("           SD 卡測試");
-  Serial.println("========================================");
-  Serial.printf("CS  = GPIO %d\n", PIN_SD_CS);
-  Serial.printf("SCK = GPIO %d\n", PIN_SPI_SCK);
-  Serial.printf("MOSI= GPIO %d\n", PIN_SPI_MOSI);
-  Serial.printf("MISO= GPIO %d\n", PIN_SPI_MISO);
-  Serial.println("");
+  delay(2000);
+  Serial.println("\n=== SD 卡測試(獨立 SPI3:SCK15 / MOSI17 / MISO3 / CS47)===");
 
-  // 關 RGB LED
-  neopixelWrite(48, 0, 0, 0);
-
-  // 啟動 SPI 匯流排,指定腳位
-  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
-
-  // GPIO 0 (CS) 設輸出 + 預設 HIGH
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
+  spiSD.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
 
-  // 嘗試掛載
-  Serial.println("掛載中...");
-  if (!SD.begin(PIN_SD_CS, SPI)) {
-    Serial.println("[!] SD 掛載失敗");
-    Serial.println("");
-    Serial.println("可能原因:");
-    Serial.println("  1. R11(10kΩ 上拉到 3V3)沒接,GPIO 0 浮空");
-    Serial.println("  2. CS / SCK / MOSI / MISO 接錯腳");
-    Serial.println("  3. SD 卡沒插進模組");
-    Serial.println("  4. SD 卡沒格式化成 FAT32");
-    Serial.println("  5. SD 模組或 SD 卡壞了");
-    while (1) delay(1000);
+  bool ok = tryMount(4000000) || tryMount(1000000) || tryMount(400000);
+  if (!ok) {
+    Serial.println("\n[!] 全部速度都掛載失敗,依序檢查:");
+    Serial.println("    1. SD 模組 VCC 是不是接到板上 5V 腳?(USB 模式 buck 軌沒電)");
+    Serial.println("    2. 六條線有沒有接對 / 接穩?(SCK15 MOSI17 MISO3 CS47)");
+    Serial.println("    3. 卡有沒有插到底?是不是 FAT32?(≤32GB,電腦重格一次)");
+    Serial.println("    4. 換一張卡試試(卡本身可能跟模組不合)");
+    return;
   }
 
-  Serial.println("[+] SD 掛載成功!");
-
-  // 顯示卡資訊
-  uint8_t cardType = SD.cardType();
-  const char* typeName = "未知";
-  if (cardType == CARD_MMC)       typeName = "MMC";
-  else if (cardType == CARD_SD)   typeName = "SDSC";
-  else if (cardType == CARD_SDHC) typeName = "SDHC";
-  else if (cardType == CARD_NONE) typeName = "無卡";
+  // 卡資訊
+  uint8_t type = SD.cardType();
+  const char* typeName = (type == CARD_MMC) ? "MMC" :
+                         (type == CARD_SD)  ? "SDSC" :
+                         (type == CARD_SDHC)? "SDHC" : "UNKNOWN";
   Serial.printf("[+] 卡類型:%s\n", typeName);
+  Serial.printf("[+] 容量:%.1f GB\n", SD.cardSize() / 1073741824.0);
+  Serial.printf("[+] 已用:%llu MB / %llu MB\n",
+                SD.usedBytes() / 1048576ULL, SD.totalBytes() / 1048576ULL);
 
-  uint64_t totalBytes = SD.totalBytes();
-  uint64_t usedBytes  = SD.usedBytes();
-  Serial.printf("[+] 總容量:%.2f GB\n", totalBytes / 1024.0 / 1024.0 / 1024.0);
-  Serial.printf("[+] 已使用:%llu MB / %llu MB\n",
-                usedBytes / 1024 / 1024, totalBytes / 1024 / 1024);
+  // 寫入測試
+  File f = SD.open("/sd_test.txt", FILE_WRITE);
+  if (f) {
+    f.println("hello from SD_Test");
+    f.close();
+    Serial.println("[+] 寫入測試 OK(/sd_test.txt)");
+  } else {
+    Serial.println("[!] 掛載成功但寫入失敗(卡寫保護?)");
+  }
 
-  // 列出根目錄檔案
-  Serial.println("");
-  Serial.println("[+] 根目錄檔案清單:");
+  // 列根目錄
+  Serial.println("[+] 根目錄:");
   File root = SD.open("/");
-  if (root) {
-    bool any = false;
-    while (true) {
-      File f = root.openNextFile();
-      if (!f) break;
-      if (f.isDirectory()) {
-        Serial.printf("    [DIR]  %s\n", f.name());
-      } else {
-        Serial.printf("    %8u  %s\n", f.size(), f.name());
-      }
-      f.close();
-      any = true;
-    }
-    if (!any) Serial.println("    (空白)");
-    root.close();
+  File entry;
+  while ((entry = root.openNextFile())) {
+    Serial.printf("    %s  %lu bytes\n", entry.name(), (unsigned long)entry.size());
+    entry.close();
   }
-
-  // 寫測試檔
-  Serial.println("");
-  Serial.println("[+] 嘗試寫入測試檔 /TEST.TXT ...");
-  File f = SD.open("/TEST.TXT", FILE_WRITE);
-  if (f) {
-    f.println("Hello from ESP32-S3");
-    f.printf("Millis: %lu\n", millis());
-    f.close();
-    Serial.println("[+] 寫入成功!");
-  } else {
-    Serial.println("[!] 寫入失敗");
-  }
-
-  // 讀回測試檔
-  Serial.println("[+] 讀回 /TEST.TXT 內容:");
-  f = SD.open("/TEST.TXT", FILE_READ);
-  if (f) {
-    while (f.available()) Serial.write(f.read());
-    f.close();
-  } else {
-    Serial.println("[!] 讀取失敗");
-  }
-
-  Serial.println("");
-  Serial.println("========================================");
-  Serial.println("  測試完成,SD 卡可以正常使用!");
-  Serial.println("========================================");
+  root.close();
+  Serial.println("\n=== 測試完成 ===");
 }
 
-void loop() {
-  // 不做事,結果已經在 setup 印完
-  delay(5000);
-}
+void loop() { delay(1000); }
