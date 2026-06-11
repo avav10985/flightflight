@@ -384,9 +384,13 @@ void base64Encode(const uint8_t* in, size_t inLen, char* out) {
   }
 }
 
+// 失敗時填這個,讓 TFT 顯示具體錯誤
+String g_geminiErr = "";
+
 // PCM audio → Gemini → JSON {"transcript":"...","action":"..."}
 // 把錄音 base64 + WAV header 一起 POST 給 Gemini,一次拿 STT + 解析
 String processAudioWithGemini() {
+  g_geminiErr = "";
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[GEM] WiFi 沒連");
     return "";
@@ -414,6 +418,7 @@ String processAudioWithGemini() {
   client.setTimeout(15000);
   if (!client.connect(GEMINI_HOST, GEMINI_PORT)) {
     Serial.println("[GEM] TLS 連線失敗");
+    g_geminiErr = "TLS 失敗";
     heap_caps_free(b64);
     return "";
   }
@@ -455,18 +460,40 @@ String processAudioWithGemini() {
   while (client.available()) full += client.readString();
   client.stop();
 
-  if (full.length() == 0) { Serial.println("[GEM] 沒回應"); return ""; }
+  if (full.length() == 0) {
+    Serial.println("[GEM] 沒回應");
+    g_geminiErr = "無回應";
+    return "";
+  }
   int first = full.indexOf("\r\n");
-  if (first > 0) Serial.printf("[GEM] %s\n", full.substring(0, first).c_str());
+  String statusLine = (first > 0) ? full.substring(0, first) : "??";
+  Serial.printf("[GEM] %s\n", statusLine.c_str());
+
+  // 檢查 HTTP 狀態
+  if (statusLine.indexOf("200") < 0) {
+    // 不是 200,把狀態碼跟 body 顯示
+    g_geminiErr = statusLine.substring(0, 24);
+    Serial.println("[GEM] HTTP 錯誤,完整回應:");
+    Serial.println(full);
+    return "";
+  }
 
   // 抽 candidates[0].content.parts[0].text(裡面又是 JSON 字串)
   int jsonStart = full.indexOf('{');
-  if (jsonStart < 0) return "";
+  if (jsonStart < 0) { g_geminiErr = "無 JSON body"; return ""; }
   String resBody = full.substring(jsonStart);
   int textKey = resBody.indexOf("\"text\":\"");
   if (textKey < 0) {
     Serial.println("[GEM] 無 text 欄位:");
     Serial.println(resBody);
+    g_geminiErr = "無 text 欄位";
+    // 看看是不是 Gemini 回了錯誤(例如 promptFeedback)
+    int errKey = resBody.indexOf("\"message\":\"");
+    if (errKey > 0) {
+      int es = errKey + 11;
+      int ee = resBody.indexOf("\"", es);
+      if (ee > 0) g_geminiErr = resBody.substring(es, min(ee, es + 30));
+    }
     return "";
   }
   int ts = textKey + 8;
@@ -528,8 +555,11 @@ void stopRec() {
   String json = processAudioWithGemini();
   unsigned long t1 = millis() - t0;
   if (json.length() == 0) {
-    Serial.printf("[GEM] 失敗 (%lu ms)\n", t1);
-    tftStatus("辨識失敗", TFT_RED);
+    Serial.printf("[GEM] 失敗 (%lu ms) %s\n", t1, g_geminiErr.c_str());
+    char ebuf[64];
+    snprintf(ebuf, sizeof(ebuf), "失敗:%s",
+             g_geminiErr.length() > 0 ? g_geminiErr.c_str() : "未知");
+    tftStatus(ebuf, TFT_RED);
     tftHint("按肩鈕重試");
     return;
   }
