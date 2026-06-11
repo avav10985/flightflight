@@ -163,9 +163,10 @@ volatile uint8_t g_vSpeak = 0;       // 語音回應:0無 1起飛 2降落 3停 4
 volatile bool    g_vFresh = false;   // task 寫 true → 主迴圈消化後寫 false
 char             g_vStatus[48] = "開機中";   // task 寫狀態字串(主迴圈顯示)
 
-#define VREC_RATE     32000          // 錄音取樣率(跟 I²S 音樂共用時脈)
+#define VREC_RATE     32000          // I²S 實際取樣(跟音樂共用時脈,不能改)
+#define VREC_WAV_RATE 16000          // 上傳取樣率:2:1 降採樣,檔小一半傳更快
 #define VREC_MAXSEC   8
-#define VREC_MAXSAMP  (VREC_RATE * VREC_MAXSEC)
+#define VREC_MAXSAMP  (VREC_WAV_RATE * VREC_MAXSEC)
 int16_t* vRecBuf   = nullptr;        // PSRAM 錄音緩衝(setup 配置)
 uint32_t vRecCount = 0;
 #endif
@@ -1588,8 +1589,8 @@ String vTranscribe() {
   memcpy(h, "RIFF", 4); uint32_t v = 36 + audioBytes; memcpy(h + 4, &v, 4);
   memcpy(h + 8, "WAVEfmt ", 8); v = 16; memcpy(h + 16, &v, 4);
   uint16_t u = 1; memcpy(h + 20, &u, 2); memcpy(h + 22, &u, 2);
-  v = VREC_RATE;     memcpy(h + 24, &v, 4);
-  v = VREC_RATE * 2; memcpy(h + 28, &v, 4);
+  v = VREC_WAV_RATE;     memcpy(h + 24, &v, 4);
+  v = VREC_WAV_RATE * 2; memcpy(h + 28, &v, 4);
   u = 2; memcpy(h + 32, &u, 2); u = 16; memcpy(h + 34, &u, 2);
   memcpy(h + 36, "data", 4); memcpy(h + 40, &audioBytes, 4);
   client.write(h, 44);
@@ -1601,6 +1602,8 @@ String vTranscribe() {
     size_t n = remain > 4096 ? 4096 : remain;
     client.write(p, n);
     p += n; remain -= n;
+    vTaskDelay(1);   // 每塊讓出 CPU:TLS 加密+上傳連續佔核心 0 會餓死
+                     // IDLE0 觸發 task WDT 重啟(2026-06-12 實測)
   }
   client.print(tail);
 
@@ -1749,7 +1752,7 @@ void voiceTask(void* arg) {
       size_t br = 0;
       if (i2s_channel_read(micRx, raw, sizeof(raw), &br, 80 / portTICK_PERIOD_MS) == ESP_OK) {
         int n = br / 4;
-        for (int i = 0; i < n && vRecCount < VREC_MAXSAMP; i++) {
+        for (int i = 0; i < n && vRecCount < VREC_MAXSAMP; i += 2) {   // 2:1 降採樣 32k→16k
           int32_t s = raw[i] >> 16;
           if (s > 32767) s = 32767;
           if (s < -32768) s = -32768;
@@ -1761,7 +1764,7 @@ void voiceTask(void* arg) {
     if (!g_vMode10) continue;
 
     // 太短 / 太弱不上傳
-    if (vRecCount < VREC_RATE / 4) { vSetStatus("太短,再試一次"); vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
+    if (vRecCount < VREC_WAV_RATE / 4) { vSetStatus("太短,再試一次"); vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
     int32_t maxAmp = 0;
     for (uint32_t i = 0; i < vRecCount; i += 8) {
       int32_t a = vRecBuf[i]; if (a < 0) a = -a;
