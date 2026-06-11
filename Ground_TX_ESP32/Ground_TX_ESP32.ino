@@ -841,8 +841,10 @@ i2s_chan_handle_t musicTx = nullptr;
 // I²S TX 初始化(沿用 Play_Test 驗證過的設定)
 void initMusicI2S() {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  chan_cfg.dma_desc_num  = 8;       // 大 DMA buffer:SD 讀取慢時不 underrun
-  chan_cfg.dma_frame_num = 512;
+  // 主程式 loop 比 Play_Test 忙(NRF24 重試 + TFT 重繪),緩衝拉到 ~190ms
+  // 6 × 1023 frames × 4B ≈ 24KB 內部 RAM,換 6138 samples 餘裕
+  chan_cfg.dma_desc_num  = 6;
+  chan_cfg.dma_frame_num = 1023;
   i2s_new_channel(&chan_cfg, &musicTx, NULL);
 
   i2s_std_config_t std_cfg = {};
@@ -885,7 +887,8 @@ void musicUpdate() {
   if (!musicPlaying) return;
   static uint8_t pcm[512];
   static int32_t tx[256];
-  for (int round = 0; round < 4; round++) {     // 每迴圈最多餵 1024 samples(32ms 音訊)
+  for (int round = 0; round < 16; round++) {    // 每迴圈最多餵 4096 samples(128ms 音訊);
+                                                 // DMA 滿會提前 return,實際讀 SD 時間只 2~4ms
     int n = musicFile.read(pcm, sizeof(pcm));
     if (n <= 0) {                                // 播完
       Serial.println("[+] 音樂播畢");
