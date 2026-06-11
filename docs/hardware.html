@@ -106,7 +106,7 @@
 
 <section>
   <h2><span class="no">B.2</span>地面站腳位配置(ESP32-S3)</h2>
-  <p>SPI 匯流排由 TFT、nRF24L01+ 與 microSD 三裝置共用(<code>bus_shared</code> 模式,各自獨立 CS);I²S 匯流排由麥克風與擴大機共用 BCLK / WS 時脈。</p>
+  <p>SPI 匯流排由 TFT 與 nRF24L01+ 共用(<code>bus_shared</code> 模式,各自獨立 CS);microSD 因其模組電平轉換晶片會佔用 MISO 線(問題 I-02),移至<b>獨立之第二組 SPI(SPI3)</b>。I²S 匯流排由麥克風與擴大機共用 BCLK / WS 時脈。</p>
   <div class="table-scroll"><table>
     <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
     <tr><td rowspan="4">類比輸入</td><td>左搖桿 Y(油門)</td><td><code>1</code></td><td>移除回中彈簧,ADC 反相校正</td></tr>
@@ -116,15 +116,16 @@
     <tr><td rowspan="3">數位輸入</td><td>三段開關 SW_A / SW_B</td><td><code>5</code> / <code>6</code></td><td>模式編碼十位 / 個位(電阻分壓三段判別)</td></tr>
     <tr><td>選單鍵</td><td><code>7</code></td><td>內部上拉</td></tr>
     <tr><td>左 / 右肩鈕</td><td><code>8</code> / <code>9</code></td><td>左肩鈕兼語音 PTT 鍵</td></tr>
-    <tr><td rowspan="3">共用 SPI</td><td>SCK / MOSI / MISO</td><td><code>38</code> / <code>39</code> / <code>40</code></td><td>TFT 40 MHz・nRF24・SD 共用</td></tr>
+    <tr><td rowspan="3">共用 SPI(SPI2)</td><td>SCK / MOSI / MISO</td><td><code>38</code> / <code>39</code> / <code>40</code></td><td>TFT 40 MHz・nRF24 共用</td></tr>
     <tr><td>TFT CS / DC / RST</td><td><code>48</code> / <code>21</code> / <code>16</code></td><td>ILI9341,背光直接 3.3 V 常亮</td></tr>
-    <tr><td>nRF24 CE / CSN・SD CS</td><td><code>41</code> / <code>42</code>・<code>47</code></td><td>—</td></tr>
+    <tr><td>nRF24 CE / CSN</td><td><code>41</code> / <code>42</code></td><td>—</td></tr>
+    <tr><td>SD 專用 SPI(SPI3)</td><td>SCK / MOSI / MISO / CS</td><td><code>15</code> / <code>17</code> / <code>47</code> / <code>0</code></td><td>獨立匯流排隔離電平轉換晶片(I-02);CS 於 GPIO 0 有 10 kΩ 上拉</td></tr>
     <tr><td rowspan="2">I²S 音訊</td><td>BCLK / WS / DOUT / DIN</td><td><code>11</code> / <code>12</code> / <code>13</code> / <code>14</code></td><td>DOUT → 擴大機,DIN ← 麥克風</td></tr>
     <tr><td>擴大機 SD(shutdown)</td><td><code>18</code></td><td>開機即拉低靜音,播放時方致能</td></tr>
   </table></div>
 
   <div class="callout">
-    <b>SPI 共存注意事項:</b>市售 microSD 模組多含 5 V 電平轉換晶片,其輸出緩衝於 CS 未選取時仍持續驅動 MISO 線,將癱瘓共用匯流排上其他裝置(本案 nRF24 即受害,問題 I-02)。解法為改用無電平轉換之 3.3 V 裸模組,或將 SD 移至獨立 SPI 匯流排。
+    <b>SPI 共存注意事項:</b>市售 microSD 模組多含 5 V 電平轉換晶片,其輸出緩衝於 CS 未選取時仍持續驅動 MISO 線,將癱瘓共用匯流排上其他裝置(本案 nRF24 即受害,問題 I-02)。本系統已將 SD 移至獨立 SPI3 匯流排徹底隔離 —— ESP32-S3 之 GPIO matrix 允許 SPI 訊號自由指派腳位,是此解法的關鍵。
   </div>
 </section>
 

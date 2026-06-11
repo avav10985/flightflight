@@ -46,10 +46,10 @@
     </tr>
     <tr>
       <td><code>I-02</code></td>
-      <td>SD 卡模組接入後 nRF24 通訊完全失效</td>
-      <td>SD 模組之電平轉換晶片於 CS 未選取時仍驅動 MISO 線,佔用共用 SPI 匯流排</td>
-      <td>暫時停用 SD;電源架構更新後重新驗證中,必要時改用無電平轉換之 3.3 V 裸模組</td>
-      <td class="st-part">驗證中</td>
+      <td>SD 卡模組接入後 nRF24 通訊完全失效;後續排查另發現 SD 供電僅 1.8 V</td>
+      <td>雙重根因:(1) SD 模組之電平轉換晶片於 CS 未選取時仍驅動 MISO 線,佔用共用 SPI 匯流排;(2) VCC 杜邦線接觸不良,5 V 跌至 1.8 V 致模組無法工作</td>
+      <td>SD 移至獨立 SPI3 匯流排(專用 SCK/MOSI/MISO/CS 腳位),與 nRF24 / TFT 完全分線;更換不良線材後掛載成功</td>
+      <td class="st-done">已結案</td>
     </tr>
     <tr>
       <td><code>I-03</code></td>
@@ -118,7 +118,7 @@
     <tr><td>GPS 導航閉環</td><td>Mode 02 導航輸出(目標 roll / pitch)接入 PID 設定點,完成定點飛行閉環;需戶外定位精度驗證</td><td>中</td></tr>
     <tr><td>氣壓定高與自動降落</td><td>BMP280 高度估計 + 油門軸 PID 實現高度保持;雷射近地距離輔助自動降落</td><td>中</td></tr>
     <tr><td>雷射避障</td><td>VL53L0X × 4 <b>硬體已全數安裝</b>(TCA9548A 多工);待實作多方向距離監測與避障迴避邏輯,與 GPS 導航整合</td><td>中</td></tr>
-    <tr><td>SD 卡資料記錄</td><td>新電源架構下重新驗證 SPI 共存;啟用後支援飛行紀錄與音訊播放</td><td>中</td></tr>
+    <tr><td>SD 卡資料記錄</td><td>硬體已驗證(獨立 SPI3 掛載成功);待實作飛行紀錄寫入與音訊播放功能</td><td>中</td></tr>
     <tr><td>頭部追蹤雲台</td><td>手機 IMU(DeviceOrientation API)→ WiFi → 機載雙伺服雲台;原型已驗證,待整合至主程式</td><td>低</td></tr>
     <tr><td>Mode 11 PC 控制</td><td>USB Serial 透明橋接,由電腦端程式直接控制飛行,作為演算法實驗介面</td><td>低</td></tr>
     <tr><td>地面站體驗強化</td><td>TFT 常駐選單(肩鍵長按呼出)、SD 音樂播放、語音 TTS 回覆(MAX98357A 硬體已就緒)</td><td>低</td></tr>
