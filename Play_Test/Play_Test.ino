@@ -4,14 +4,14 @@
 // 不接 TFT、不接 INMP441、不接任何其他東西。
 // 只測試播放路徑,排除 Voice_Test 多元件互相干擾的問題。
 //
-// === 接線 ===
+// === 接線(2026-06-12 SD 改獨立 SPI3)===
 //   SD 模組:                   MAX98357A:
-//     VCC  → 5V                VIN  → 5V
+//     VCC  → buck 5V 軌        VIN  → 5V
 //     GND  → GND               GND  → GND
-//     CS   → GPIO 47           LRC  → GPIO 12
-//     SCK  → GPIO 38           BCLK → GPIO 11
-//     MOSI → GPIO 39           DIN  → GPIO 13
-//     MISO → GPIO 40           OUT± → 喇叭
+//     CS   → GPIO 0            LRC  → GPIO 12
+//     SCK  → GPIO 15           BCLK → GPIO 11
+//     MOSI → GPIO 17           DIN  → GPIO 13
+//     MISO → GPIO 47           OUT± → 喇叭
 //
 // === SD 卡需要 ===
 //   根目錄放一個 /REC_001.WAV(32 kHz / 單聲道 / 16-bit PCM)
@@ -27,10 +27,11 @@
 #include <SD.h>
 #include <driver/i2s_std.h>
 
-#define PIN_SD_CS      47
-#define PIN_SPI_SCK    38
-#define PIN_SPI_MOSI   39
-#define PIN_SPI_MISO   40
+// SD 獨立 SPI3 腳位(2026-06-12 定案,跟 Ground_TX_ESP32 一致)
+#define PIN_SD_CS       0
+#define PIN_SPI_SCK    15
+#define PIN_SPI_MOSI   17
+#define PIN_SPI_MISO   47
 
 #define PIN_BCLK       11
 #define PIN_WS         12
@@ -39,6 +40,8 @@
 
 #define SAMPLE_RATE    32000
 #define BUF_SAMPLES    512
+
+SPIClass spiSD(HSPI);   // SD 專用第二組 SPI(S3 上 HSPI = SPI3)
 
 i2s_chan_handle_t tx_handle = NULL;
 File              playFile;
@@ -92,18 +95,16 @@ void setup() {
   Serial.println("  Play_Test:SD → I²S 純播放(無 TFT/其他)");
   Serial.println("========================================");
 
-  neopixelWrite(48, 0, 0, 0);   // 關 RGB LED
-
   // MAX98357A SD 預設拉低(保持 shutdown,避免 boot 時喇叭聽到雜訊)
   // I²S 跑起來後再拉高啟用
   pinMode(PIN_AMP_SD, OUTPUT);
   digitalWrite(PIN_AMP_SD, LOW);
 
-  // SPI + SD(不卡死,SD 失敗也讓 setup 跑完)
-  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
+  // SPI3 + SD(不卡死,SD 失敗也讓 setup 跑完)
+  spiSD.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SD_CS);
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
-  sdOK = SD.begin(PIN_SD_CS, SPI);
+  sdOK = SD.begin(PIN_SD_CS, spiSD);
   Serial.println(sdOK ? "[+] SD 掛載成功" : "[!] SD 沒接,進入閒置(插卡後重啟才會跑)");
 
   // I²S
