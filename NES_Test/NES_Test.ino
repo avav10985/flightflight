@@ -37,18 +37,23 @@ extern void display_message(const char *msg);
 
 void setup()
 {
-  Serial.begin(115200);
+  // 顯示最先初始化:畫面變深灰 = setup 有在跑(除錯白畫面用)
+  display_begin();
+  display_message("display OK");
 
-  esp_wifi_deinit();      // 不用 WiFi,省電省 RAM
+  Serial.begin(115200);
+  display_message("serial OK");
+
   esp_task_wdt_deinit();  // 模擬器主迴圈會佔滿 CPU,關看門狗
+  display_message("wdt off");
 
   // MAX98357A 開聲音(平常拉低靜音,模擬器要出聲)
   pinMode(PIN_AMP_SD, OUTPUT);
   digitalWrite(PIN_AMP_SD, HIGH);
-
-  display_begin();
+  display_message("amp on");
 
   // SD:獨立 SPI3 @20MHz,掛載到 /fs 讓 nofrendo 用 C fopen 讀 ROM
+  display_message("SD init...");
   spiSD.begin(15, 47, 17, 0);
   pinMode(0, OUTPUT);
   digitalWrite(0, HIGH);
@@ -58,6 +63,7 @@ void setup()
     display_message("SD mount failed!");
     while (1) delay(1000);
   }
+  display_message("SD OK");
   FS filesystem = SD;
 
   // 找根目錄第一個 .nes
@@ -94,6 +100,8 @@ void setup()
     while (1) delay(1000);
   }
 
+  display_message("ROM found, NES start!");
+  delay(500);
   Serial.println("NoFrendo start!");
   nofrendo_main(1, argv);
   Serial.println("NoFrendo end!");

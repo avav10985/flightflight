@@ -65,12 +65,15 @@ extern void display_begin()
     tft.fillScreen(bg_color);
 }
 
+static int msgY = 8;
 extern void display_message(const char *msg)
 {
     tft.setTextColor(TFT_ORANGE, bg_color);
     tft.setTextSize(2);
-    tft.setCursor(8, 100);
+    tft.setCursor(8, msgY);
     tft.println(msg);
+    msgY += 22;
+    if (msgY > 220) msgY = 8;
 }
 
 extern "C" void display_init()
