@@ -100,9 +100,14 @@ void tftTranscript(const char* text) {
 // Groq API endpoint
 #define GROQ_HOST       "api.groq.com"
 #define GROQ_PORT       443
-#define GROQ_PATH       "/openai/v1/audio/transcriptions"
-#define GROQ_MODEL      "whisper-large-v3-turbo"   // 最快、夠準
-#define GROQ_LANGUAGE   "zh"                       // 中文,跳過自動偵測加速
+#define GROQ_STT_PATH   "/openai/v1/audio/transcriptions"
+#define GROQ_CHAT_PATH  "/openai/v1/chat/completions"
+#define GROQ_STT_MODEL  "whisper-large-v3-turbo"        // 語音→文字
+#define GROQ_LLM_MODEL  "llama-3.1-8b-instant"          // 文字→JSON 指令(最快免費)
+#define GROQ_LANGUAGE   "zh"
+
+// 系統 prompt(單行)
+#define LLM_SYSTEM_PROMPT "你是無人機語音指令解析器。把使用者的中文輸入翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)、mode(切模式,要 mode: 0/1/2)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。只回 JSON,不要其他文字。"
 
 i2s_chan_handle_t i2s_rx = nullptr;
 int16_t* recBuf = nullptr;
@@ -204,7 +209,7 @@ String transcribeWithGroq() {
   const char* boundary = "----Mode10TestBoundary";
   String head1 = String("--") + boundary + "\r\n"
                + "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
-               + GROQ_MODEL + "\r\n";
+               + GROQ_STT_MODEL + "\r\n";
   String head2 = String("--") + boundary + "\r\n"
                + "Content-Disposition: form-data; name=\"language\"\r\n\r\n"
                + GROQ_LANGUAGE + "\r\n";
@@ -221,7 +226,7 @@ String transcribeWithGroq() {
                    + head4.length() + wavLen + tail.length();
 
   // HTTP request line + headers
-  client.printf("POST %s HTTP/1.1\r\n", GROQ_PATH);
+  client.printf("POST %s HTTP/1.1\r\n", GROQ_STT_PATH);
   client.printf("Host: %s\r\n", GROQ_HOST);
   client.printf("Authorization: Bearer %s\r\n", GROQ_API_KEY);
   client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary);
@@ -289,6 +294,116 @@ String transcribeWithGroq() {
   return body.substring(textStart, textEnd);
 }
 
+// JSON 字串需要 escape 的字元(quote / backslash / control chars)
+String jsonEscape(const String& s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else out += c;
+  }
+  return out;
+}
+
+// 反向:把 JSON escape 過的字串解開(把 \" 變回 ")
+String jsonUnescape(const String& s) {
+  String out;
+  out.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    if (s[i] == '\\' && i + 1 < s.length()) {
+      char n = s[i + 1];
+      switch (n) {
+        case '"':  out += '"'; break;
+        case '\\': out += '\\'; break;
+        case '/':  out += '/'; break;
+        case 'n':  out += '\n'; break;
+        case 'r':  out += '\r'; break;
+        case 't':  out += '\t'; break;
+        default:   out += n; break;
+      }
+      i++;
+    } else {
+      out += s[i];
+    }
+  }
+  return out;
+}
+
+// 文字 → Groq Llama → JSON 指令字串(失敗回空字串)
+String parseCommandWithLlama(const String& userText) {
+  if (WiFi.status() != WL_CONNECTED) return "";
+  if (userText.length() == 0) return "";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(10000);
+  if (!client.connect(GROQ_HOST, GROQ_PORT)) {
+    Serial.println("[LLM] TLS 連線失敗");
+    return "";
+  }
+
+  String userEsc = jsonEscape(userText);
+  String body = String("{\"model\":\"") + GROQ_LLM_MODEL + "\","
+              + "\"messages\":["
+              + "{\"role\":\"system\",\"content\":\"" + LLM_SYSTEM_PROMPT + "\"},"
+              + "{\"role\":\"user\",\"content\":\"" + userEsc + "\"}"
+              + "],"
+              + "\"response_format\":{\"type\":\"json_object\"},"
+              + "\"temperature\":0.1}";
+
+  client.printf("POST %s HTTP/1.1\r\n", GROQ_CHAT_PATH);
+  client.printf("Host: %s\r\n", GROQ_HOST);
+  client.printf("Authorization: Bearer %s\r\n", GROQ_API_KEY);
+  client.print("Content-Type: application/json\r\n");
+  client.printf("Content-Length: %d\r\n", body.length());
+  client.print("Connection: close\r\n\r\n");
+  client.print(body);
+
+  Serial.println("[LLM] 等回應 ...");
+  unsigned long t0 = millis();
+  while (!client.available() && millis() - t0 < 10000) delay(10);
+  String full = "";
+  while (client.available()) full += client.readString();
+  client.stop();
+
+  if (full.length() == 0) { Serial.println("[LLM] 沒回應"); return ""; }
+  int first = full.indexOf("\r\n");
+  if (first > 0) Serial.printf("[LLM] %s\n", full.substring(0, first).c_str());
+
+  // 從 response 找 "content":"..."
+  int jsonStart = full.indexOf('{');
+  if (jsonStart < 0) return "";
+  String resBody = full.substring(jsonStart);
+  int contentKey = resBody.indexOf("\"content\":\"");
+  if (contentKey < 0) { Serial.println("[LLM] 無 content 欄位"); return ""; }
+  int cs = contentKey + 11;
+  // 找配對的結尾引號(略過 escape 過的)
+  int ce = cs;
+  while (ce < (int)resBody.length()) {
+    if (resBody[ce] == '\\' && ce + 1 < (int)resBody.length()) { ce += 2; continue; }
+    if (resBody[ce] == '"') break;
+    ce++;
+  }
+  if (ce >= (int)resBody.length()) return "";
+  String contentEscaped = resBody.substring(cs, ce);
+  String contentJson = jsonUnescape(contentEscaped);
+  return contentJson;   // 回傳例如 {"action":"takeoff"}
+}
+
+// 從 LLM 回傳的 JSON 字串抽 action 欄位
+String extractAction(const String& jsonContent) {
+  int idx = jsonContent.indexOf("\"action\":\"");
+  if (idx < 0) return "unknown";
+  int s = idx + 10;
+  int e = jsonContent.indexOf("\"", s);
+  if (e < 0) return "unknown";
+  return jsonContent.substring(s, e);
+}
+
 void stopRec() {
   recording = false;
   unsigned long dur = millis() - recStartMs;
@@ -304,19 +419,36 @@ void stopRec() {
     tftStatus("訊號太弱", TFT_ORANGE);
     return;
   }
-  // 上傳
+  // Phase 2:STT
   tftStatus("上傳中...", TFT_YELLOW);
   unsigned long t0 = millis();
   String text = transcribeWithGroq();
   unsigned long t1 = millis() - t0;
-  if (text.length() > 0) {
-    Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
-    tftStatus("完成", TFT_GREEN);
-    tftTranscript(text.c_str());
-  } else {
+  if (text.length() == 0) {
     Serial.printf("[STT] 失敗 (%lu ms)\n", t1);
     tftStatus("辨識失敗", TFT_RED);
+    return;
   }
+  Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
+  tftTranscript(text.c_str());
+
+  // Phase 3:文字 → JSON 指令
+  tftStatus("解析中...", TFT_YELLOW);
+  unsigned long t2 = millis();
+  String llmJson = parseCommandWithLlama(text);
+  unsigned long t3 = millis() - t2;
+  if (llmJson.length() == 0) {
+    Serial.printf("[LLM] 失敗 (%lu ms)\n", t3);
+    tftStatus("解析失敗", TFT_RED);
+    return;
+  }
+  Serial.printf("[LLM] (%lu ms) %s\n", t3, llmJson.c_str());
+  String action = extractAction(llmJson);
+  Serial.printf("[ACT] action=%s\n", action.c_str());
+  // TFT 顯示 action(取代「完成」)
+  char buf[64];
+  snprintf(buf, sizeof(buf), "→ %s", action.c_str());
+  tftStatus(buf, TFT_GREEN);
 }
 
 void setup() {
