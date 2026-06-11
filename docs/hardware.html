@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>硬體設計 — 四軸無人機技術報告</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html">首頁</a>
+  <a href="architecture.html">系統架構</a>
+  <a href="hardware.html" class="active">硬體設計</a>
+  <a href="control.html">飛控與校準</a>
+  <a href="voice.html">語音子系統</a>
+  <a href="testing.html">測試與驗證</a>
+</nav>
+
+<div class="page-head">
+  <div class="crumb">CHAPTER B</div>
+  <h1>硬體設計</h1>
+  <div class="desc">電源架構與腳位配置</div>
+</div>
+
+<section>
+  <h2><span class="no">B.1</span>地面站電源架構</h2>
+  <p>初版設計中所有 3.3 V 負載均由 ESP32-S3 模組板載穩壓器供電。實測發現該穩壓器(額定約 300 mA)無法承受 WiFi 射頻啟動之瞬時電流(約 400 mA),導致欠壓重啟(brown-out)。重新設計後採<b>雙穩壓器分軌架構</b>:晶片與周邊各自擁有獨立 3.3 V 軌,僅共地,射頻電流尖峰不再影響周邊供電品質。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 860 330" font-family="'Noto Sans TC',sans-serif">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="#94a3b5"/>
+        </marker>
+      </defs>
+      <rect x="20" y="120" width="130" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
+      <text x="85" y="144" fill="#e8edf3" font-size="14" text-anchor="middle" font-weight="bold">2S 鋰電池</text>
+      <text x="85" y="163" fill="#94a3b5" font-size="11.5" text-anchor="middle">6.6 – 8.4 V</text>
+      <rect x="205" y="120" width="130" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
+      <text x="270" y="144" fill="#e8edf3" font-size="14" text-anchor="middle" font-weight="bold">降壓模組</text>
+      <text x="270" y="163" fill="#94a3b5" font-size="11.5" text-anchor="middle">Buck → 5 V</text>
+      <line x1="150" y1="148" x2="200" y2="148" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar)"/>
+      <line x1="335" y1="148" x2="395" y2="148" stroke="#e0a432" stroke-width="2"/>
+      <circle cx="395" cy="148" r="4" fill="#e0a432"/>
+      <text x="367" y="138" fill="#e0a432" font-size="11.5" text-anchor="middle">5 V 軌</text>
+      <line x1="395" y1="148" x2="395" y2="70" stroke="#e0a432" stroke-width="2"/>
+      <line x1="395" y1="70" x2="450" y2="70" stroke="#e0a432" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="455" y="42" width="150" height="56" rx="8" fill="#1b232e" stroke="#4d9fff"/>
+      <text x="530" y="66" fill="#4d9fff" font-size="13.5" text-anchor="middle" font-weight="bold">板載 AMS1117</text>
+      <text x="530" y="84" fill="#94a3b5" font-size="11.5" text-anchor="middle">1 A・3.3 V(晶片軌)</text>
+      <line x1="605" y1="70" x2="660" y2="70" stroke="#4d9fff" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="665" y="42" width="170" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
+      <text x="750" y="66" fill="#e8edf3" font-size="13.5" text-anchor="middle" font-weight="bold">ESP32-S3 晶片</text>
+      <text x="750" y="84" fill="#94a3b5" font-size="11.5" text-anchor="middle">含 WiFi RF(峰值 ≈ 400 mA)</text>
+      <line x1="395" y1="148" x2="395" y2="226" stroke="#e0a432" stroke-width="2"/>
+      <line x1="395" y1="226" x2="450" y2="226" stroke="#e0a432" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="455" y="198" width="150" height="56" rx="8" fill="#1b232e" stroke="#41c46a"/>
+      <text x="530" y="222" fill="#41c46a" font-size="13.5" text-anchor="middle" font-weight="bold">外掛 LD1117</text>
+      <text x="530" y="240" fill="#94a3b5" font-size="11.5" text-anchor="middle">1 A・3.3 V(周邊軌)+ 100 µF</text>
+      <line x1="605" y1="226" x2="660" y2="226" stroke="#41c46a" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="665" y="186" width="170" height="80" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
+      <text x="750" y="208" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">周邊負載</text>
+      <text x="750" y="228" fill="#94a3b5" font-size="11.5" text-anchor="middle">TFT・nRF24L01+</text>
+      <text x="750" y="246" fill="#94a3b5" font-size="11.5" text-anchor="middle">INMP441・microSD</text>
+      <rect x="20" y="32" width="130" height="50" rx="8" fill="#1b232e" stroke="#f06058" stroke-dasharray="5 4"/>
+      <text x="85" y="53" fill="#f06058" font-size="13" text-anchor="middle" font-weight="bold">USB 5 V</text>
+      <text x="85" y="71" fill="#94a3b5" font-size="11" text-anchor="middle">僅燒錄 / 除錯時</text>
+      <line x1="150" y1="57" x2="280" y2="57" stroke="#f06058" stroke-width="1.4" stroke-dasharray="5 4"/>
+      <line x1="280" y1="57" x2="450" y2="62" stroke="#f06058" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+      <rect x="20" y="282" width="815" height="36" rx="8" fill="rgba(240,96,88,.08)" stroke="#f06058" stroke-dasharray="5 4"/>
+      <text x="427" y="305" fill="#f06058" font-size="13" text-anchor="middle" font-weight="bold">操作限制:USB 與電池電源互斥,嚴禁同時連接(兩穩壓器輸出並聯將產生反向灌流,可能損壞 USB 主機端)</text>
+    </svg>
+    <div class="cap">圖 B-1 地面站雙穩壓器分軌電源架構</div>
+  </div>
+
+  <p>本架構之直接效益:WiFi 啟動與發射期間,周邊軌電壓不受晶片軌負載變動影響,TFT 顯示器閃爍與 nRF24 通訊不穩定問題隨之消除。</p>
+  <div class="callout">
+    <b>操作程序影響:</b>韌體燒錄時僅接 USB(電池斷開),飛行與整合測試時僅接電池(USB 斷開)。此限制意味<b>序列埠監看與周邊(TFT / 麥克風)無法同時使用</b> —— 故所有執行期狀態與錯誤訊息均設計為顯示於 TFT。
+  </div>
+</section>
+
+<section>
+  <h2><span class="no">B.2</span>地面站腳位配置(ESP32-S3)</h2>
+  <p>SPI 匯流排由 TFT、nRF24L01+ 與 microSD 三裝置共用(<code>bus_shared</code> 模式,各自獨立 CS);I²S 匯流排由麥克風與擴大機共用 BCLK / WS 時脈。</p>
+  <div class="table-scroll"><table>
+    <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
+    <tr><td rowspan="4">類比輸入</td><td>左搖桿 Y(油門)</td><td><code>1</code></td><td>移除回中彈簧,ADC 反相校正</td></tr>
+    <tr><td>右搖桿 Y(俯仰)</td><td><code>4</code></td><td>ADC 反相校正</td></tr>
+    <tr><td>左搖桿 X(偏航,可選)</td><td><code>2</code></td><td>預留,預設由肩鈕控制偏航</td></tr>
+    <tr><td>右搖桿 X(翻滾)</td><td><code>10</code></td><td>預留接線</td></tr>
+    <tr><td rowspan="3">數位輸入</td><td>三段開關 SW_A / SW_B</td><td><code>5</code> / <code>6</code></td><td>模式編碼十位 / 個位(電阻分壓三段判別)</td></tr>
+    <tr><td>選單鍵</td><td><code>7</code></td><td>內部上拉</td></tr>
+    <tr><td>左 / 右肩鈕</td><td><code>8</code> / <code>9</code></td><td>左肩鈕兼語音 PTT 鍵</td></tr>
+    <tr><td rowspan="3">共用 SPI</td><td>SCK / MOSI / MISO</td><td><code>38</code> / <code>39</code> / <code>40</code></td><td>TFT 40 MHz・nRF24・SD 共用</td></tr>
+    <tr><td>TFT CS / DC / RST</td><td><code>48</code> / <code>21</code> / <code>16</code></td><td>ILI9341,背光直接 3.3 V 常亮</td></tr>
+    <tr><td>nRF24 CE / CSN・SD CS</td><td><code>41</code> / <code>42</code>・<code>47</code></td><td>—</td></tr>
+    <tr><td rowspan="2">I²S 音訊</td><td>BCLK / WS / DOUT / DIN</td><td><code>11</code> / <code>12</code> / <code>13</code> / <code>14</code></td><td>DOUT → 擴大機,DIN ← 麥克風</td></tr>
+    <tr><td>擴大機 SD(shutdown)</td><td><code>18</code></td><td>開機即拉低靜音,播放時方致能</td></tr>
+  </table></div>
+
+  <div class="callout">
+    <b>SPI 共存注意事項:</b>市售 microSD 模組多含 5 V 電平轉換晶片,其輸出緩衝於 CS 未選取時仍持續驅動 MISO 線,將癱瘓共用匯流排上其他裝置(本案 nRF24 即受害,問題 I-02)。解法為改用無電平轉換之 3.3 V 裸模組,或將 SD 移至獨立 SPI 匯流排。
+  </div>
+</section>
+
+<section>
+  <h2><span class="no">B.3</span>飛行控制器腳位配置(ESP32)</h2>
+  <div class="table-scroll"><table>
+    <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
+    <tr><td rowspan="2">無線通訊</td><td>nRF24 CE / CSN</td><td><code>4</code> / <code>5</code></td><td rowspan="2">VSPI(SCK 18 / MISO 19 / MOSI 23)</td></tr>
+    <tr><td>SPI 匯流排</td><td><code>18</code> / <code>19</code> / <code>23</code></td></tr>
+    <tr><td>感測器匯流排</td><td>I²C SDA / SCL</td><td><code>21</code> / <code>22</code></td><td>100 kHz:MPU-6050、BMP280(0x76)、TCA9548A(0x70)、QMC5883(0x0D / 0x2C 自動偵測)</td></tr>
+    <tr><td>衛星定位</td><td>UART2 RX / TX</td><td><code>33</code> / <code>32</code></td><td>NEO-6M @ 9600 bps</td></tr>
+    <tr><td rowspan="2">動力輸出</td><td>M1 前左(CW)/ M2 前右(CCW)</td><td><code>25</code> / <code>26</code></td><td rowspan="2">MOSFET PWM,X 型配置</td></tr>
+    <tr><td>M3 後左(CCW)/ M4 後右(CW)</td><td><code>27</code> / <code>14</code></td></tr>
+    <tr><td>電源監測</td><td>電池分壓 ADC</td><td><code>34</code></td><td>分壓比 4.0(30k + 10k)</td></tr>
+  </table></div>
+</section>
+
+<div class="pager">
+  <a href="architecture.html">← 系統架構</a>
+  <a href="control.html">飛控與校準 →</a>
+</div>
+
+<footer>
+  四軸無人機飛行控制系統技術報告 · 2026<br>
+  原始碼:<a href="https://github.com/avav10985/flightflight" target="_blank">github.com/avav10985/flightflight</a>
+</footer>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>測試與驗證 — 四軸無人機技術報告</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html">首頁</a>
+  <a href="architecture.html">系統架構</a>
+  <a href="hardware.html">硬體設計</a>
+  <a href="control.html">飛控與校準</a>
+  <a href="voice.html">語音子系統</a>
+  <a href="testing.html" class="active">測試與驗證</a>
+</nav>
+
+<div class="page-head">
+  <div class="crumb">CHAPTER E</div>
+  <h1>測試與驗證</h1>
+  <div class="desc">問題解決紀錄、未來工作與參考資料</div>
+</div>
+
+<section>
+  <h2><span class="no">E.1</span>問題解決紀錄</h2>
+  <p>下表彙整開發期間之系統級問題、根因分析方法與處置結果。多數問題之定位採<b>對照實驗法</b>:固定其餘變因、單獨替換疑似元件,以重現性確認根因。</p>
+  <div class="table-scroll"><table>
+    <tr><th>編號</th><th>問題現象</th><th>根因分析</th><th>處置</th><th>狀態</th></tr>
+    <tr>
+      <td><code>I-01</code></td>
+      <td>ESP32-S3 執行 WiFi 初始化即無限重啟,最簡 5 行測試程式亦重現</td>
+      <td>同一 USB 線 / 同一程式對照測試:經典 ESP32(AMS1117 1 A)正常、S3 模組必然重啟 → 鎖定 S3 板載穩壓器(約 300 mA)不足以供應 WiFi RF 啟動電流(約 400 mA)</td>
+      <td>更換為 1 A 穩壓器之開發板,並增設 LD1117 獨立周邊軌(硬體設計章)</td>
+      <td class="st-done">已結案</td>
+    </tr>
+    <tr>
+      <td><code>I-02</code></td>
+      <td>SD 卡模組接入後 nRF24 通訊完全失效</td>
+      <td>SD 模組之電平轉換晶片於 CS 未選取時仍驅動 MISO 線,佔用共用 SPI 匯流排</td>
+      <td>暫時停用 SD;電源架構更新後重新驗證中,必要時改用無電平轉換之 3.3 V 裸模組</td>
+      <td class="st-part">驗證中</td>
+    </tr>
+    <tr>
+      <td><code>I-03</code></td>
+      <td>nRF24 以最大發射功率工作時系統偶發重啟</td>
+      <td>PA_MAX 發射瞬間電流尖峰致穩壓器輸出電壓下垂</td>
+      <td>發射功率暫降至 PA_MIN(桌面測試距離足夠);電源改善後將復測高功率檔位</td>
+      <td class="st-part">已緩解</td>
+    </tr>
+    <tr>
+      <td><code>I-04</code></td>
+      <td>喇叭於開機及待機時輸出雜訊</td>
+      <td>MAX98357A shutdown 腳浮空導致擴大機隨機致能,放大 I²S 匯流排時脈串擾</td>
+      <td>開機即將 SD 腳設為輸出並拉低,播放時方致能</td>
+      <td class="st-done">已結案</td>
+    </tr>
+    <tr>
+      <td><code>I-05</code></td>
+      <td>雲端推論服務回應 HTTP 429(速率限制)</td>
+      <td>免費層級額度(15–30 請求/分鐘)無法支撐連續整合測試</td>
+      <td>STT 與 LLM 解析拆至不同服務之獨立額度;中期規劃改用本地離線辨識(§E.2)</td>
+      <td class="st-part">已緩解</td>
+    </tr>
+    <tr>
+      <td><code>I-06</code></td>
+      <td>語音正確轉錄為「起飛」但 LLM 回傳 unknown</td>
+      <td>STT 輸出附帶標點符號,與 few-shot 範例字面失配</td>
+      <td>解析前正規化:去除前後空白與中英文標點</td>
+      <td class="st-done">已結案</td>
+    </tr>
+    <tr>
+      <td><code>I-07</code></td>
+      <td>ESP32-S3 原生 USB CDC 序列埠於部分主機列舉不穩</td>
+      <td>S3 原生 USB 列舉時序與主機端驅動相依</td>
+      <td>所有執行期狀態改以 TFT 顯示,序列埠僅作燒錄輔助(與電源互斥限制一致)</td>
+      <td class="st-done">已結案</td>
+    </tr>
+    <tr>
+      <td><code>I-08</code></td>
+      <td>起飛瞬間機體向固定方向偏移</td>
+      <td>IMU 水平基準偏差(校準時機體未完全水平);偏差 1° 即造成持續橫移</td>
+      <td>三層對策:完整校準程序 + 動作偵測拒寫 + 懸停水平自學習(飛控與校準章 §C.4)</td>
+      <td class="st-part">持續觀察</td>
+    </tr>
+  </table></div>
+</section>
+
+<section>
+  <h2><span class="no">E.2</span>未來工作</h2>
+  <div class="table-scroll"><table>
+    <tr><th>項目</th><th>內容</th><th>優先序</th></tr>
+    <tr><td>本地離線語音辨識</td><td>導入 Espressif ESP-SR(AFE + MultiNet),以拼音定義中文命令詞於裝置端直接辨識;消除網路依賴、速率限制與雲端延遲(目標 &lt; 1 s)。需自行打包中文模型(mn6_cn)至 flash model 分區</td><td>高</td></tr>
+    <tr><td>語音指令 → 控制鏈路銜接</td><td>將 Mode 10 解析所得 action 轉換為 Signal 封包序列,經 nRF24 注入飛行控制(含逾時回復搖桿控制之安全機制)</td><td>高</td></tr>
+    <tr><td>GPS 導航閉環</td><td>Mode 02 導航輸出(目標 roll / pitch)接入 PID 設定點,完成定點飛行閉環;需戶外定位精度驗證</td><td>中</td></tr>
+    <tr><td>氣壓定高</td><td>BMP280 高度估計 + 油門軸 PID,實現高度保持;為自動降落之前置功能</td><td>中</td></tr>
+    <tr><td>SD 卡資料記錄</td><td>新電源架構下重新驗證 SPI 共存;啟用後支援飛行紀錄與音訊播放</td><td>中</td></tr>
+    <tr><td>頭部追蹤雲台</td><td>手機 IMU(DeviceOrientation API)→ WiFi → 機載雙伺服雲台;原型已驗證,待整合至主程式</td><td>低</td></tr>
+  </table></div>
+</section>
+
+<section class="refs">
+  <h2><span class="no">E.3</span>參考資料</h2>
+  <ol>
+    <li>Espressif Systems, <i>ESP32-S3 Technical Reference Manual</i>. <a href="https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf" target="_blank">espressif.com</a></li>
+    <li>Nordic Semiconductor, <i>nRF24L01+ Single Chip 2.4GHz Transceiver Product Specification v1.0</i>. <a href="https://www.nordicsemi.com/Products/nRF24-series" target="_blank">nordicsemi.com</a></li>
+    <li>InvenSense (TDK), <i>MPU-6000 and MPU-6050 Product Specification Revision 3.4</i>. <a href="https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/" target="_blank">invensense.tdk.com</a></li>
+    <li>Espressif Systems, <i>ESP-SR Speech Recognition Framework Documentation</i>. <a href="https://docs.espressif.com/projects/esp-sr/zh_CN/latest/esp32s3/" target="_blank">docs.espressif.com</a></li>
+    <li>Groq Inc., <i>GroqCloud API Documentation — Speech to Text / Chat Completions</i>. <a href="https://console.groq.com/docs" target="_blank">console.groq.com/docs</a></li>
+  </ol>
+</section>
+
+<div class="pager">
+  <a href="voice.html">← 語音子系統</a>
+  <a href="index.html">回首頁 →</a>
+</div>
+
+<footer>
+  四軸無人機飛行控制系統技術報告 · 2026<br>
+  原始碼:<a href="https://github.com/avav10985/flightflight" target="_blank">github.com/avav10985/flightflight</a>
+</footer>
+</body>
+</html>

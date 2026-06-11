@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>飛控與校準 — 四軸無人機技術報告</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html">首頁</a>
+  <a href="architecture.html">系統架構</a>
+  <a href="hardware.html">硬體設計</a>
+  <a href="control.html" class="active">飛控與校準</a>
+  <a href="voice.html">語音子系統</a>
+  <a href="testing.html">測試與驗證</a>
+</nav>
+
+<div class="page-head">
+  <div class="crumb">CHAPTER C</div>
+  <h1>飛控與校準</h1>
+  <div class="desc">飛行模式、安全機制、姿態控制與 IMU 校準系統</div>
+</div>
+
+<!-- ============ C.1 飛行模式 ============ -->
+<section>
+  <h2><span class="no">C.1</span>飛行模式與安全機制</h2>
+
+  <h3>C.1.1 模式編碼</h3>
+  <p>模式由地面站兩顆三段開關組合產生:<code>mode = SW_A × 10 + SW_B</code>(各 0 / 1 / 2,撥桿上 = 0、中 = 1、下 = 2),共 9 個有效值。<b>採兩位數編碼而非連續整數 0–8</b>,使十位 / 個位各自保留語意(十位 = 控制來源類別,個位 = 子模式),封包僅佔 1 byte。</p>
+  <div class="table-scroll"><table>
+    <tr><th>編碼</th><th>名稱</th><th>說明</th><th>狀態</th></tr>
+    <tr><td><code>00</code></td><td>安全 / 校準</td><td>馬達強制鎖定;進入瞬間自動觸發快速校準;可執行完整校準與 PID 調參(§C.4)</td><td class="st-done">已完成</td></tr>
+    <tr><td><code>01</code></td><td>手動自穩</td><td>搖桿設定目標角度,PID 維持姿態 —— 目前唯一允許武裝之模式</td><td class="st-done">已完成</td></tr>
+    <tr><td><code>02</code></td><td>GPS 定點導航</td><td>自動飛向目標座標;距離 / 方位角計算與導航狀態機完成,待接入 PID 設定點</td><td class="st-part">部分完成</td></tr>
+    <tr><td><code>10</code></td><td>語音控制</td><td>雲端 STT + LLM 指令解析(語音子系統章);辨識管線已驗證,待接入控制鏈</td><td class="st-part">部分完成</td></tr>
+    <tr><td><code>11</code></td><td>PC 控制</td><td>USB Serial 透明橋接,由電腦端程式控制</td><td class="st-todo">規劃中</td></tr>
+    <tr><td><code>12</code> <code>20</code> <code>21</code> <code>22</code></td><td>預留</td><td>—</td><td class="st-todo">—</td></tr>
+  </table></div>
+
+  <h3>C.1.2 武裝(Arm)安全鏈</h3>
+  <p>馬達輸出受四層獨立條件保護,任一不滿足即解除武裝(disarm)並鎖定馬達:</p>
+  <div class="table-scroll"><table>
+    <tr><th>層級</th><th>機制</th><th>設計目的</th></tr>
+    <tr><td>1. 開機鎖定</td><td>開機後 <code>safetyReleased = false</code>,必須<b>先撥至 mode 00 一次</b>才解除鎖定</td><td>防止開機時開關停在飛行模式、油門非零造成馬達直接啟動</td></tr>
+    <tr><td>2. 模式白名單</td><td><code>modeFlyable()</code> 函式明確列舉可飛模式(目前僅 <code>01</code>);未實作模式一律拒絕武裝</td><td>新模式必須顯式加入白名單,預設安全</td></tr>
+    <tr><td>3. 油門條件</td><td>解鎖後仍須<b>油門收底(&lt; 20 / 255)</b>才完成武裝</td><td>防止切模式瞬間以高油門起轉</td></tr>
+    <tr><td>4. 失聯保護</td><td>超過 1 秒未收到地面站封包 → 立即 disarm、油門歸零、PID 積分項清除</td><td>遙控失效時不令飛機亂飛;disarm 同時將懸停學得之水平偏移寫入 NVS(§C.4.4)</td></tr>
+  </table></div>
+</section>
+
+<!-- ============ C.2 姿態估計 ============ -->
+<section>
+  <h2><span class="no">C.2</span>姿態估計 — 互補濾波</h2>
+  <p>陀螺儀積分短期精確但長期漂移;加速度計長期穩定但受機體振動干擾。互補濾波以高通 / 低通互補方式融合兩者,每迴圈執行:</p>
+  <div class="formula">roll&#8320;  = 0.98 × (roll  + gyro_roll × dt) + 0.02 × acc_roll
+pitch&#8320; = 0.98 × (pitch + gyro_pitch × dt) + 0.02 × acc_pitch</div>
+  <p>係數 0.98 / 0.02 之物理意義:陀螺積分主導瞬時響應(高通),加速度計以約 1–2 秒時間常數緩慢拉回絕對基準(低通),振動雜訊被平均掉。偏航軸無重力參考,採相同結構但以<b>磁力計絕對航向</b>作為 2% 修正源;無磁力計時退化為純積分模式(可飛但航向緩慢漂移)。</p>
+</section>
+
+<!-- ============ C.3 PID 控制 ============ -->
+<section>
+  <h2><span class="no">C.3</span>PID 姿態控制</h2>
+
+  <h3>C.3.1 控制律</h3>
+  <p>角度環 PID:搖桿值線性映射為目標角度,誤差經 PID 產生修正量,再進入 X 型混控:</p>
+  <div class="formula">setpoint = (stick − 127) × (MAX_ANGLE / 127)        // MAX_ANGLE = 20°
+output   = Kp·e + Ki·∫e·dt + Kd·de/dt              // e = setpoint − 量測角
+
+M1(前左 CW)  = T + pitchOut + rollOut − yawOut      // 混控
+M2(前右 CCW) = T + pitchOut − rollOut + yawOut
+M3(後左 CCW) = T − pitchOut + rollOut + yawOut
+M4(後右 CW)  = T − pitchOut − rollOut − yawOut      // 各輸出限幅 [1000, 2000]</div>
+
+  <h3>C.3.2 調參歷程</h3>
+  <p>PID 增益經三輪實飛迭代,過程記錄如下 —— 這是全專案<b>耗時最多的調試項目之一</b>:</p>
+  <div class="table-scroll"><table>
+    <tr><th>輪次</th><th>現象</th><th>調整</th></tr>
+    <tr><td>初版</td><td>輕推搖桿馬達即急遽加速,姿態過衝後振盪 —— 增益過高,室內無法安全測試</td><td>Kp / Kd 全面下調至保守值,最大傾角限制 15°</td></tr>
+    <tr><td>第二輪</td><td>保守值下姿態穩定,但操縱響應遲鈍,室外抗風不足</td><td>最大傾角 15° → 20°(中等響應);增益維持保守,改以線上調參逐步試探</td></tr>
+    <tr><td>現行</td><td>Kp 1.0 / Ki 0.01 / Kd 0.3(roll & pitch 共用),yaw 角速度環 Kp 0.8 / Ki 0.01</td><td>作為基準值寫入 NVS;後續微調全部透過手把選單線上進行,毋須重新燒錄</td></tr>
+  </table></div>
+
+  <h3>C.3.3 線上調參管線</h3>
+  <p>調 PID 最痛的傳統流程是「改程式 → 燒錄 → 試飛 → 再改」。本系統把調參做成<b>遙控線上操作</b>,試飛中即可即時改值:</p>
+  <ol>
+    <li><b>手把選單</b>:選單鍵進入,搖桿上下移游標、左右調值。8 個項目:<code>Kp / Ki / Kd / KpY / KiY</code>(增量分別 0.1 / 0.005 / 0.05 / 0.1 / 0.005)+ 三個動作項「保存PID」「快速校準」「完整校準」。</li>
+    <li><b>封包傳遞</b>:變動值以 <code>paramID</code>(1–5 = 增益、100 / 101 / 102 = 動作)+ <code>paramVal</code> 搭載於 50 Hz 控制封包,不中斷飛行控制。</li>
+    <li><b>飛機端去重</b>:50 Hz 下同一參數會重複收到數十次,接收端以「ID + 值未變化即忽略」去重,動作項(校準 / 存檔)不致重複觸發。</li>
+    <li><b>持久化</b>:調到滿意後選「保存PID」(paramID 102),飛機端將五個增益寫入 NVS;重新上電自動載入,毋須每次重調。</li>
+  </ol>
+</section>
+
+<!-- ============ C.4 校準系統 ============ -->
+<section>
+  <h2><span class="no">C.4</span>IMU 校準系統</h2>
+  <p>校準是本專案<b>實際飛行品質的決定性因素,也是除錯耗時最久的子系統</b>。核心問題:MPU-6050 的陀螺零偏隨溫度漂移、模組焊接與機架組裝必然存在水平安裝誤差 —— <b>水平基準偏差 1°,飛機起飛就會持續往該方向橫移</b>(問題 I-08「起飛偏一邊」之根因)。校準系統因此演化出三層機制。</p>
+
+  <h3>C.4.1 兩級校準</h3>
+  <div class="table-scroll"><table>
+    <tr><th></th><th>快速校準(gyro)</th><th>完整校準(full)</th></tr>
+    <tr><td>校準對象</td><td>陀螺儀零偏(三軸靜止讀值平均)</td><td>陀螺零偏 + <b>水平基準</b>(加速度計姿態零點)</td></tr>
+    <tr><td>機體要求</td><td>靜止即可,姿態不拘</td><td>必須<b>置於水平面</b> —— 校準面即未來的「水平」定義</td></tr>
+    <tr><td>耗時</td><td>約 1 秒</td><td>數秒</td></tr>
+    <tr><td>觸發時機</td><td>每次進入 mode 00 自動執行</td><td>手動觸發(換場地 / 摔機後 / 起飛持續偏移時)</td></tr>
+  </table></div>
+
+  <h3>C.4.2 觸發路徑</h3>
+  <p>兩種校準均可遠端觸發,且僅於<b>未武裝 + mode 00 + 油門收底</b>時受理:</p>
+  <div class="table-scroll"><table>
+    <tr><th>路徑</th><th>機制</th><th>觸發</th></tr>
+    <tr><td>模式邊緣自動</td><td>偵測 mode 非 0 → 0 之轉換瞬間</td><td>快速校準</td></tr>
+    <tr><td>手把選單</td><td>paramID 100 / 101(含去重)</td><td>快速 / 完整校準</td></tr>
+    <tr><td>flags 位元</td><td>Signal.flags bit 0 之 0→1 邊緣</td><td>完整校準</td></tr>
+    <tr><td>序列埠指令</td><td><code>cal</code> / <code>calfull</code>(開發除錯用)</td><td>快速 / 完整校準</td></tr>
+  </table></div>
+
+  <h3>C.4.3 動作偵測拒寫</h3>
+  <p>早期版本曾因校準期間手持晃動,把錯誤的零偏與水平基準寫入,導致後續飛行全面異常。現行校準程序全程監測量測波動,<b>超出閾值即判定校準失敗、拒絕寫入並回報地面站</b>(Telemetry status 之 CAL_FAILED 位元,TFT 顯示),保留前次有效校準值。</p>
+
+  <h3>C.4.4 懸停水平自學習(in-flight level learning)</h3>
+  <p>即使完整校準成功,校準平面與真實水平仍可能有殘餘誤差(桌面本身不平)。系統因此加入<b>飛行中緩慢自學習</b>機制:</p>
+  <div class="formula">// 進入條件(需同時成立並持續 3 秒):
+//   armed + 油門位於懸停區 + 偏航角速度 < 5°/s
+//   + 角速度變化 < 5°/s + |加速度向量| ≈ 1 G(±7%,代表未加減速)
+levelOffsetRoll  += roll  × 0.0002      // 每迴圈吸收當前殘餘角的萬分之二
+levelOffsetPitch += pitch × 0.0002      // 50 Hz 下約 100 秒完全收斂</div>
+  <ul>
+    <li>學習速率刻意設定極慢:太快會與 PID 自穩互相拉扯,太慢使用者無感;0.0002 / 迴圈為實測折衷。</li>
+    <li>嚴格的進入條件確保只在「真懸停」時學習 —— 機體加減速或轉向期間之姿態角不會被誤認為水平偏差。</li>
+    <li>降落 disarm 或失聯 disarm 時,學得之偏移自動寫入 NVS:<b>每次飛行都讓下次起飛更準</b>。</li>
+  </ul>
+
+  <h3>C.4.5 持久化(NVS)</h3>
+  <p>陀螺零偏、水平基準、自學習偏移與五個 PID 增益均存於 ESP32 NVS(非揮發性快閃儲存),開機自動載入。實務效益:野外換電池重開機,不需要找水平面重新校準即可起飛。</p>
+</section>
+
+<div class="pager">
+  <a href="hardware.html">← 硬體設計</a>
+  <a href="voice.html">語音子系統 →</a>
+</div>
+
+<footer>
+  四軸無人機飛行控制系統技術報告 · 2026<br>
+  原始碼:<a href="https://github.com/avav10985/flightflight" target="_blank">github.com/avav10985/flightflight</a>
+</footer>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系統架構 — 四軸無人機技術報告</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html">首頁</a>
+  <a href="architecture.html" class="active">系統架構</a>
+  <a href="hardware.html">硬體設計</a>
+  <a href="control.html">飛控與校準</a>
+  <a href="voice.html">語音子系統</a>
+  <a href="testing.html">測試與驗證</a>
+</nav>
+
+<div class="page-head">
+  <div class="crumb">CHAPTER A</div>
+  <h1>系統架構</h1>
+  <div class="desc">系統拓樸、程式架構與通訊協定</div>
+</div>
+
+<!-- ============ A.1 系統拓樸 ============ -->
+<section>
+  <h2><span class="no">A.1</span>系統拓樸</h2>
+  <p>系統由三個 MCU 節點構成:地面站(ESP32-S3)、飛行控制器(ESP32)與獨立影像節點(ESP32-CAM)。主控制鏈路使用 nRF24L01+ 2.4 GHz 專屬通道;語音辨識與影像串流使用 WiFi,與控制鏈路在頻段上分時使用以避免干擾。<b>點擊下圖任一元件可檢視其技術說明與設計考量。</b></p>
+
+  <div class="arch">
+    <div class="arch-col col-handle">
+      <h4>地面站(手把 V2-A)</h4>
+      <div class="node" data-k="s3">ESP32-S3 N16R8 <small>主控:UI / 通訊 / 語音前端</small></div>
+      <div class="node" data-k="tft">TFT 顯示器 ILI9341 <small>SPI 40 MHz・操作介面與遙測顯示</small></div>
+      <div class="node" data-k="joy">操縱輸入組 <small>搖桿 ×2・三段開關 ×2・肩鈕 ×2</small></div>
+      <div class="node" data-k="mic">INMP441 麥克風 <small>I²S・語音指令輸入</small></div>
+      <div class="node" data-k="spk">MAX98357A 擴大機 <small>I²S・語音回覆(預留)</small></div>
+      <div class="node" data-k="pwr">雙 LDO 電源模組 <small>AMS1117 + LD1117 分軌</small></div>
+      <div class="node cloud" data-k="cloud">雲端推論服務(WiFi / TLS) <small>Whisper STT + LLM 指令解析</small></div>
+    </div>
+
+    <div class="arch-link">
+      <b>nRF24L01+</b><br>2.4 GHz CH 88<br>↓ Signal 12 B @ 50 Hz<br>↑ Telemetry 20 B<br>(ACK payload)
+    </div>
+
+    <div class="arch-col col-drone">
+      <h4>飛行控制器(機載)</h4>
+      <div class="node" data-k="fc">ESP32 飛控主程式 <small>濾波・PID・混控・導航狀態機</small></div>
+      <div class="node" data-k="imu">MPU-6050 IMU <small>I²C・姿態量測來源</small></div>
+      <div class="node" data-k="gps">NEO-6M GPS <small>UART・定位與導航</small></div>
+      <div class="node" data-k="baro">BMP280 / VL53L0X ×2 <small>氣壓定高・雷射近距(預留)</small></div>
+      <div class="node" data-k="mag">QMC5883 磁力計 <small>絕對航向・抑制陀螺漂移</small></div>
+      <div class="node" data-k="motor">動力輸出 ×4 <small>MOSFET PWM・X 型混控</small></div>
+      <div class="node" data-k="cam">ESP32-CAM <small>獨立節點・WiFi 即時影像</small></div>
+    </div>
+  </div>
+
+  <div class="arch-detail" id="archDetail">
+    <h4>元件技術說明</h4>
+    <p>點選上方任一元件,此處將顯示其功能定位、介面規格與相關設計考量。</p>
+  </div>
+</section>
+
+<!-- ============ A.2 程式架構 ============ -->
+<section>
+  <h2><span class="no">A.2</span>程式架構</h2>
+
+  <h3>A.2.1 程式組織策略</h3>
+  <p>專案採「<b>主程式 + 單元測試程式</b>」雙層結構:兩支主程式(<code>Drone_FC_Full</code> 飛行控制器、<code>Ground_TX_ESP32</code> 地面站)承載完整功能;另維護 28 支獨立可燒錄的單元測試程式,每個子系統(IMU、GPS、TFT、I²S 音訊、WiFi、NRF24⋯)均有對應之最小化驗證程式。系統級問題發生時,可立即降階至單元程式重現,大幅縮小問題定位範圍 —— 本專案多數硬體問題(如穩壓器容量不足)均以此方法確診。</p>
+
+  <h3>A.2.2 飛行控制器主迴圈(50 Hz)</h3>
+  <div class="diagram">
+    <svg viewBox="0 0 900 120" font-family="'Noto Sans TC',sans-serif">
+      <defs>
+        <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="#94a3b5"/>
+        </marker>
+      </defs>
+      <g font-size="12.5" text-anchor="middle">
+        <rect x="8"   y="30" width="106" height="56" rx="8" fill="#1b232e" stroke="#4d9fff"/>
+        <text x="61"  y="54" fill="#e8edf3" font-weight="bold">recvData()</text>
+        <text x="61"  y="73" fill="#94a3b5" font-size="11">收指令+回遙測</text>
+        <line x1="114" y1="58" x2="136" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="139" y="30" width="106" height="56" rx="8" fill="#1b232e" stroke="#4d9fff"/>
+        <text x="192" y="54" fill="#e8edf3" font-weight="bold">checkArm()</text>
+        <text x="192" y="73" fill="#94a3b5" font-size="11">解鎖/武裝判定</text>
+        <line x1="245" y1="58" x2="267" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="270" y="30" width="116" height="56" rx="8" fill="#1b232e" stroke="#4d9fff"/>
+        <text x="328" y="54" fill="#e8edf3" font-weight="bold">checkCalib()</text>
+        <text x="328" y="73" fill="#94a3b5" font-size="11">校準觸發偵測</text>
+        <line x1="386" y1="58" x2="408" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="411" y="30" width="116" height="56" rx="8" fill="#1b232e" stroke="#b48cff"/>
+        <text x="469" y="54" fill="#e8edf3" font-weight="bold">readAttitude()</text>
+        <text x="469" y="73" fill="#94a3b5" font-size="11">IMU+互補濾波</text>
+        <line x1="527" y1="58" x2="549" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="552" y="30" width="110" height="56" rx="8" fill="#1b232e" stroke="#b48cff"/>
+        <text x="607" y="54" fill="#e8edf3" font-weight="bold">pidControl()</text>
+        <text x="607" y="73" fill="#94a3b5" font-size="11">三軸 PID+混控</text>
+        <line x1="662" y1="58" x2="684" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="687" y="30" width="96" height="56" rx="8" fill="#1b232e" stroke="#41c46a"/>
+        <text x="735" y="54" fill="#e8edf3" font-weight="bold">PWM 輸出</text>
+        <text x="735" y="73" fill="#94a3b5" font-size="11">M1–M4</text>
+        <line x1="783" y1="58" x2="805" y2="58" stroke="#94a3b5" stroke-width="1.5" marker-end="url(#arA)"/>
+        <rect x="808" y="30" width="86" height="56" rx="8" fill="#1b232e" stroke="#f06058"/>
+        <text x="851" y="54" fill="#e8edf3" font-weight="bold">failsafe()</text>
+        <text x="851" y="73" fill="#94a3b5" font-size="11">失聯保護</text>
+      </g>
+      <text x="450" y="110" fill="#94a3b5" font-size="11.5" text-anchor="middle">背景並行:GPS NMEA 解析(UART2)・氣壓 / 磁力計取樣・Mode 02 導航狀態機・懸停水平自學習</text>
+    </svg>
+    <div class="cap">圖 A-1 飛行控制器主迴圈資料流</div>
+  </div>
+
+  <h3>A.2.3 地面站程式結構</h3>
+  <ul>
+    <li><b>50 Hz 控制迴圈</b>:搖桿 ADC 取樣(含反相校正與中位映射)→ 開關狀態編碼 → 組裝 Signal 封包 → nRF24 發送 → 讀取 ACK payload 遙測。</li>
+    <li><b>TFT 介面狀態機</b>:兩個畫面(飛行資訊畫面 / PID 調參選單)。繪製採 <b>dirty-flag 策略</b>:靜態框架只畫一次,動態數值僅於變動時重繪 —— 避免每迴圈全螢幕重繪佔用共用 SPI 匯流排、拖慢 nRF24 通訊。畫面切換時設置 <code>g_flightDirty / g_menuDirty</code> 旗標強制完整重繪一次。</li>
+    <li><b>選單操作</b>:選單鍵進入 / 離開,搖桿上下移動游標、左右調值,共 8 個項目(5 個 PID 增益 + 3 個動作項,詳見飛控與校準章)。</li>
+    <li><b>編譯期功能旗標</b>:<code>ENABLE_SD / ENABLE_VOICE_MODE10 / ENABLE_MUSIC / ENABLE_PC_MODE11</code> 等,未完成或暫停用之功能以旗標隔離,不影響主功能編譯與穩定性。飛機端同樣以 <code>ENABLE_BMP280 / ENABLE_VL53L0X / ENABLE_HMC5883</code> 控制感測器啟用。</li>
+    <li><b>憑證隔離</b>:WiFi 帳密與 API 金鑰集中於 <code>secrets.h</code>(排除於版本控制),倉庫提供 <code>secrets.h.example</code> 範本。</li>
+    <li><b>持久層</b>:飛機端以 ESP32 NVS 儲存 IMU 校準與 PID 參數,斷電保留、開機自動載入。</li>
+  </ul>
+</section>
+
+<!-- ============ A.3 通訊協定 ============ -->
+<section>
+  <h2><span class="no">A.3</span>通訊協定</h2>
+  <p>控制鏈路採 nRF24L01+ Enhanced ShockBurst,通道 88(2.488 GHz),自訂 5-byte 管線位址(避開函式庫常見預設值,降低同頻干擾)。地面站以約 50 Hz 發送指令封包;遙測資料以 <b>ACK payload</b> 機制搭載於確認封包回傳,不佔用額外傳輸時隙。</p>
+
+  <h3>A.3.1 下行封包 Signal(地面站 → 飛行控制器,12 bytes)</h3>
+  <div class="table-scroll"><table>
+    <tr><th>欄位</th><th>型別</th><th>說明</th></tr>
+    <tr><td><code>throttle / pitch / roll / yaw</code></td><td>uint8 × 4</td><td>搖桿值 0–255,中位 127</td></tr>
+    <tr><td><code>mode</code></td><td>uint8</td><td>飛行模式兩位數編碼(詳見飛控與校準章)</td></tr>
+    <tr><td><code>flags</code></td><td>uint8</td><td>bit 0:完整校準觸發;其餘保留</td></tr>
+    <tr><td><code>paramID</code></td><td>uint8</td><td>線上調參 / 遠端動作識別碼(0 = 無)</td></tr>
+    <tr><td><code>paramVal</code></td><td>float</td><td>參數值(paramID ≠ 0 時有效)</td></tr>
+  </table></div>
+
+  <h3>A.3.2 上行封包 Telemetry(飛行控制器 → 地面站,20 bytes)</h3>
+  <div class="table-scroll"><table>
+    <tr><th>欄位</th><th>型別</th><th>說明</th></tr>
+    <tr><td><code>roll / pitch</code></td><td>int16 × 2</td><td>姿態角 × 10(0.1° 解析度)</td></tr>
+    <tr><td><code>yawRate</code></td><td>int16</td><td>偏航角速度 × 10(°/s)</td></tr>
+    <tr><td><code>altitude_dm</code></td><td>int16</td><td>相對高度(分米),範圍 ±3276.7 m</td></tr>
+    <tr><td><code>heading</code></td><td>int16</td><td>絕對航向 × 10(0–3599,0 = 北)</td></tr>
+    <tr><td><code>status</code></td><td>uint8</td><td>位元旗標:armed / 校準中 / 校準失敗 / GPS fix</td></tr>
+    <tr><td><code>satCount</code></td><td>uint8</td><td>GPS 可見衛星數</td></tr>
+    <tr><td><code>lat_e7 / lon_e7</code></td><td>int32 × 2</td><td>經緯度 × 10⁷(約 1.1 cm 解析度)</td></tr>
+  </table></div>
+  <p>封包大小 20 bytes,符合 nRF24 ACK payload 上限(32 bytes)並保留擴充空間。失聯保護:訊號中斷超過 1 秒,飛行控制器立即解除武裝並將油門歸零(詳見飛控與校準章)。</p>
+</section>
+
+<div class="pager">
+  <a href="index.html">← 首頁</a>
+  <a href="hardware.html">硬體設計 →</a>
+</div>
+
+<footer>
+  四軸無人機飛行控制系統技術報告 · 2026<br>
+  原始碼:<a href="https://github.com/avav10985/flightflight" target="_blank">github.com/avav10985/flightflight</a>
+</footer>
+
+<script>
+const ARCH_INFO = {
+  s3: ["ESP32-S3 N16R8 — 地面站主控制器",
+    "雙核心 Xtensa LX7 @ 240 MHz、16 MB Flash、8 MB Octal PSRAM。負責 50 Hz 控制迴圈(搖桿取樣 → 封包發送 → 遙測接收)、TFT 介面繪製,以及 Mode 10 之音訊擷取與雲端通訊。PSRAM 用於語音錄音緩衝(10 秒 @ 16 kHz ≈ 320 KB)。",
+    "選型備註:初版採用之低價 S3 模組板載穩壓器僅約 300 mA,無法支撐 WiFi 工作,經對照實驗確認後更換為 1 A 穩壓器板型(問題 I-01)。"],
+  tft: ["TFT 顯示器(ILI9341,240×320)",
+    "SPI @ 40 MHz,LovyanGFX 驅動,內嵌中文字型。顯示飛行姿態、高度、航向、GPS 狀態、模式與 PID 調參選單。因電源互斥限制,序列埠於整合測試時不可用,本顯示器為唯一執行期輸出通道。",
+    "介面選型:並列匯流排版本需 13 隻 GPIO,SPI 版本節省 9 隻;與 nRF24 / SD 共用匯流排,以 bus_shared 模式與獨立 CS 仲裁。"],
+  joy: ["操縱輸入組",
+    "雙軸搖桿 × 2(ADC 取樣;油門軸移除回中彈簧以保持油門位置)、三段開關 × 2(模式編碼)、肩鈕 × 2(左肩鈕兼語音 PTT)、選單鍵。",
+    "實作備註:搖桿兩軸之電氣方向與操作直覺相反,於韌體端統一反相校正。"],
+  mic: ["INMP441 I²S MEMS 麥克風",
+    "全數位 I²S 介面輸出,16 kHz / 16-bit 單聲道取樣,直接寫入 PSRAM。數位介面可避開手把上 TFT、nRF24 與電源切換產生之類比雜訊。",
+    "與擴大機共用 I²S BCLK / WS 時脈線(GPIO 11 / 12),資料線各自獨立(DIN 14 / DOUT 13)。"],
+  spk: ["MAX98357A I²S Class-D 擴大機",
+    "預留語音回覆(TTS)輸出。shutdown 腳(GPIO 18)於開機即拉低靜音,僅於播放時致能,消除 I²S 時脈串擾被放大之雜訊(問題 I-04)。", ""],
+  pwr: ["雙 LDO 分軌電源",
+    "2S 鋰電池 → 降壓模組 5 V → 板載 AMS1117(晶片軌)與外掛 LD1117 + 100 µF(周邊軌)。兩條 3.3 V 軌僅共地,WiFi 射頻電流尖峰不影響周邊供電。詳見硬體設計章。",
+    "操作限制:USB 與電池嚴禁同時連接 —— 兩穩壓器輸出並聯將產生反向灌流,可能損壞 USB 主機。"],
+  cloud: ["雲端推論服務(Mode 10)",
+    "TLS 連線上傳 WAV 至 Whisper large-v3-turbo 進行中文語音辨識,轉錄文字再經 Llama-3.3-70B(few-shot + JSON 強制輸出)解析為結構化飛行指令。端到端延遲約 3 秒。詳見語音子系統章。", ""],
+  fc: ["飛行控制主程式(ESP32)",
+    "主迴圈:IMU 讀取 → 互補濾波姿態解算 → 角度環 PID → X 型混控 → PWM 輸出,並行處理 nRF24 收發、GPS NMEA 解析、遙測組包與導航狀態機(圖 A-1)。",
+    "驗證策略:Gyro / Manual / PID 三階段獨立程式逐層驗證。"],
+  imu: ["MPU-6050 慣性量測單元",
+    "三軸陀螺儀 + 三軸加速度計,I²C @ 100 kHz。互補濾波(0.98 / 0.02)融合出 roll / pitch 姿態角。",
+    "校準資料(陀螺零偏、水平基準)存於 NVS,斷電保留;校準程序含動作偵測拒寫機制。詳見飛控與校準章。"],
+  gps: ["NEO-6M 衛星定位模組",
+    "UART @ 9600 bps,NMEA 解析取得經緯度(×10⁷ 定點數)、衛星數與訊號強度。Mode 02 之距離 / 方位角計算與導航狀態機已完成,待接入 PID 設定點。", ""],
+  baro: ["BMP280 氣壓計 + VL53L0X 雷射測距 × 2",
+    "氣壓計提供相對高度估計(定高用);雷射測距經 TCA9548A I²C 多工器掛載兩顆(近地 / 避障用)。硬體與驅動均已就緒,等待高度控制環實作。", ""],
+  mag: ["QMC5883 磁力計(GY-271)",
+    "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
+  motor: ["動力輸出(空心杯馬達 × 4)",
+    "MOSFET PWM 直驅,X 型配置混控,輸出限幅 [1000, 2000]。",
+    "調校紀錄:初始 PID 增益過高導致響應過敏,經實飛測試降至保守值並限制最大傾角 20°。"],
+  cam: ["ESP32-CAM 影像節點",
+    "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援飛行中調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
+};
+document.querySelectorAll(".node").forEach(n => {
+  n.addEventListener("click", () => {
+    document.querySelectorAll(".node").forEach(x => x.classList.remove("sel"));
+    n.classList.add("sel");
+    const [title, desc, extra] = ARCH_INFO[n.dataset.k];
+    const d = document.getElementById("archDetail");
+    d.innerHTML = `<h4>${title}</h4><p>${desc}</p>` + (extra ? `<div class="extra">${extra}</div>` : "");
+    if (window.innerWidth < 760) d.scrollIntoView({behavior: "smooth", block: "nearest"});
+  });
+});
+</script>
+</body>
+</html>

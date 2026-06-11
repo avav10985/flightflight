@@ -4,183 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>四軸無人機飛行控制系統 — 技術報告</title>
-<style>
-  :root {
-    --bg: #0e1217;
-    --bg2: #151b23;
-    --card: #1b232e;
-    --line: #2c3a4d;
-    --text: #e8edf3;
-    --dim: #94a3b5;
-    --accent: #4d9fff;
-    --green: #41c46a;
-    --orange: #e0a432;
-    --red: #f06058;
-    --purple: #b48cff;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    background: var(--bg); color: var(--text);
-    font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
-    line-height: 1.75; font-size: 15.5px;
-  }
-  /* ===== 導覽 ===== */
-  nav {
-    position: sticky; top: 0; z-index: 100;
-    background: rgba(14,18,23,.94); backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--line);
-    display: flex; gap: 2px; padding: 9px 14px; overflow-x: auto;
-  }
-  nav a {
-    color: var(--dim); text-decoration: none; font-size: 13.5px;
-    padding: 5px 13px; border-radius: 6px; white-space: nowrap; transition: all .15s;
-  }
-  nav a:hover, nav a.active { color: var(--text); background: var(--card); }
-  /* ===== 封面 ===== */
-  header {
-    max-width: 1020px; margin: 0 auto; padding: 80px 24px 50px;
-    border-bottom: 2px solid var(--line);
-  }
-  header .doc-type { color: var(--accent); font-size: 14px; letter-spacing: 3px; font-weight: 700; }
-  header h1 { font-size: clamp(26px, 4.5vw, 40px); font-weight: 900; margin: 10px 0 6px; line-height: 1.35; }
-  header .subtitle { color: var(--dim); font-size: clamp(14px, 2.2vw, 17px); }
-  header .meta {
-    display: flex; flex-wrap: wrap; gap: 28px; margin-top: 28px;
-    color: var(--dim); font-size: 13.5px;
-  }
-  header .meta b { color: var(--text); display: block; font-size: 14.5px; font-weight: 600; }
-  /* ===== 區塊 ===== */
-  section { max-width: 1020px; margin: 0 auto; padding: 54px 24px 10px; }
-  section > h2 {
-    font-size: clamp(21px, 3.4vw, 27px); font-weight: 800;
-    padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 22px;
-  }
-  section > h2 .no { color: var(--accent); margin-right: 10px; }
-  section h3 { font-size: 18px; font-weight: 700; margin: 30px 0 12px; color: var(--accent); }
-  section p { margin-bottom: 14px; }
-  section ul, section ol { padding-left: 24px; margin-bottom: 14px; }
-  section li { margin: 4px 0; }
-  code {
-    background: var(--card); border: 1px solid var(--line); border-radius: 4px;
-    padding: 1px 7px; font-size: 13.5px; font-family: Consolas, "Courier New", monospace;
-    color: #9ecbff;
-  }
-  .formula {
-    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent);
-    border-radius: 8px; padding: 14px 20px; margin: 14px 0;
-    font-family: Consolas, monospace; font-size: 14px; overflow-x: auto; white-space: pre;
-    line-height: 1.9; color: #cfe3ff;
-  }
-  /* ===== 表格 ===== */
-  table {
-    width: 100%; border-collapse: collapse; margin: 14px 0 22px;
-    font-size: 14px; background: var(--bg2); border-radius: 10px; overflow: hidden;
-  }
-  th {
-    background: var(--card); color: var(--text); text-align: left;
-    padding: 9px 14px; font-weight: 700; border-bottom: 2px solid var(--line);
-    white-space: nowrap;
-  }
-  td { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--dim); vertical-align: top; }
-  td:first-child, th:first-child { padding-left: 18px; }
-  td b, td code { color: var(--text); }
-  tr:last-child td { border-bottom: none; }
-  .st-done { color: var(--green); font-weight: 700; }
-  .st-part { color: var(--orange); font-weight: 700; }
-  .st-todo { color: var(--dim); }
-  .st-bug  { color: var(--red); font-weight: 700; }
-  .table-scroll { overflow-x: auto; }
-  /* ===== SVG 圖 ===== */
-  .diagram {
-    background: var(--bg2); border: 1px solid var(--line); border-radius: 12px;
-    padding: 18px; margin: 16px 0 24px; overflow-x: auto;
-  }
-  .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-  .diagram .cap { text-align: center; color: var(--dim); font-size: 13px; margin-top: 10px; }
-  /* ===== 架構互動圖 ===== */
-  .arch { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: start; }
-  @media (max-width: 760px) { .arch { grid-template-columns: 1fr; } .arch-link { margin: 0 auto; } }
-  .arch-col { display: flex; flex-direction: column; gap: 8px; }
-  .arch-col h4 { text-align: center; font-size: 15.5px; padding: 9px; border-radius: 8px; }
-  .col-handle h4 { background: rgba(77,159,255,.12); color: var(--accent); }
-  .col-drone  h4 { background: rgba(65,196,106,.12); color: var(--green); }
-  .arch-link { align-self: center; text-align: center; color: var(--dim); font-size: 12.5px; padding: 8px 4px; line-height: 1.55; }
-  .arch-link b { color: var(--orange); font-size: 14px; }
-  .node {
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 8px 13px; cursor: pointer; transition: all .15s; font-size: 14px;
-  }
-  .node small { display: block; color: var(--dim); font-size: 12px; }
-  .node:hover { border-color: var(--accent); }
-  .node.sel { border-color: var(--accent); background: rgba(77,159,255,.10); }
-  .node.cloud { border-style: dashed; }
-  .arch-detail {
-    margin-top: 18px; background: var(--bg2); border: 1px solid var(--line);
-    border-radius: 12px; padding: 20px 24px; min-height: 110px;
-  }
-  .arch-detail h4 { color: var(--accent); font-size: 16.5px; margin-bottom: 6px; }
-  .arch-detail p { font-size: 14.5px; margin-bottom: 0; }
-  .arch-detail .extra { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--dim); font-size: 13.5px; }
-  /* ===== 參考資料 ===== */
-  .refs ol { counter-reset: ref; list-style: none; padding-left: 0; }
-  .refs li {
-    counter-increment: ref; padding: 8px 0 8px 46px; position: relative;
-    border-bottom: 1px solid var(--line); color: var(--dim); font-size: 14px;
-  }
-  .refs li::before {
-    content: "[" counter(ref) "]"; position: absolute; left: 0; color: var(--accent);
-    font-family: Consolas, monospace;
-  }
-  .refs a { color: var(--accent); text-decoration: none; }
-  .refs a:hover { text-decoration: underline; }
-  footer {
-    text-align: center; color: var(--dim); font-size: 13px;
-    padding: 44px 20px 56px; border-top: 1px solid var(--line); margin-top: 56px;
-  }
-  footer a { color: var(--accent); }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<nav id="nav">
-  <a href="#abstract">摘要</a>
-  <a href="#spec">系統規格</a>
-  <a href="#arch">系統架構</a>
-  <a href="#hw">硬體設計</a>
-  <a href="#proto">通訊協定</a>
-  <a href="#fc">飛控軟體</a>
-  <a href="#voice">語音子系統</a>
-  <a href="#test">測試與驗證</a>
-  <a href="#refs">參考資料</a>
+<nav>
+  <a href="index.html" class="active">首頁</a>
+  <a href="architecture.html">系統架構</a>
+  <a href="hardware.html">硬體設計</a>
+  <a href="control.html">飛控與校準</a>
+  <a href="voice.html">語音子系統</a>
+  <a href="testing.html">測試與驗證</a>
 </nav>
 
-<header>
+<header class="cover">
   <div class="doc-type">TECHNICAL REPORT</div>
   <h1>四軸無人機飛行控制系統<br>設計與實作技術報告</h1>
   <div class="subtitle">自製飛行控制器、無線地面站與雲端 AI 語音控制之整合系統</div>
   <div class="meta">
-    <div><b>文件版本</b>v1.0</div>
+    <div><b>文件版本</b>v1.1</div>
     <div><b>日期</b>2026 年 6 月</div>
     <div><b>開發週期</b>2026/04 – 進行中</div>
     <div><b>原始碼管理</b>Git(192+ commits)</div>
   </div>
 </header>
 
-<!-- ============ 1. 摘要 ============ -->
-<section id="abstract">
+<section>
   <h2><span class="no">1.</span>摘要</h2>
   <p>本專案自零開始設計並實作一套完整的四軸無人機系統,不採用任何現成飛控板或遙控器,涵蓋三個子系統:</p>
   <ul>
-    <li><b>飛行控制器</b>:以 ESP32 為核心,自行實作慣性量測融合(互補濾波)、三軸串級 PID 姿態控制、X 型四馬達混控,並整合 GPS、氣壓計、磁力計與雷射測距感測器。</li>
-    <li><b>地面站(手把)</b>:以 ESP32-S3 為核心,2.4 吋彩色 TFT 全中文操作介面,雙搖桿 + 9 種飛行模式,經 nRF24L01+ 與飛行控制器進行 50 Hz 雙向通訊(指令下行/遙測上行)。</li>
+    <li><b>飛行控制器</b>:以 ESP32 為核心,自行實作慣性量測融合(互補濾波)、三軸 PID 姿態控制、X 型四馬達混控,並整合 GPS、氣壓計、磁力計與雷射測距感測器。</li>
+    <li><b>地面站(手把)</b>:以 ESP32-S3 為核心,2.4 吋彩色 TFT 全中文操作介面,雙搖桿 + 9 種飛行模式,經 nRF24L01+ 與飛行控制器進行 50 Hz 雙向通訊(指令下行 / 遙測上行),支援線上 PID 調參與遠端校準。</li>
     <li><b>AI 語音控制子系統(Mode 10)</b>:地面站內建 I²S 麥克風,按住肩鈕錄音後經 WiFi 上傳雲端,以 Whisper 模型進行中文語音辨識,再由大型語言模型解析為結構化飛行指令(JSON),全程延遲約 3 秒。</li>
   </ul>
-  <p>開發過程採對照實驗方法定位多項系統級問題,包括穩壓器容量不足導致之 WiFi 欠壓重啟、SPI 匯流排佔用衝突、射頻發射電流尖峰等,並完成雙穩壓器電源架構之重新設計。本文件記錄系統之完整技術規格、設計決策與驗證結果。</p>
+  <p>開發過程採對照實驗方法定位多項系統級問題,包括穩壓器容量不足導致之 WiFi 欠壓重啟、SPI 匯流排佔用衝突、射頻發射電流尖峰等,並完成雙穩壓器電源架構之重新設計。本報告依主題分章,記錄系統之完整技術規格、設計決策與驗證結果。</p>
 </section>
 
-<!-- ============ 2. 系統規格 ============ -->
-<section id="spec">
+<section>
   <h2><span class="no">2.</span>系統規格總覽</h2>
 
   <h3>2.1 飛行控制器(機載)</h3>
@@ -206,446 +66,44 @@
     <tr><td>語音輸入</td><td><b>INMP441</b> I²S MEMS 麥克風(16 kHz / 16-bit / 單聲道)</td></tr>
     <tr><td>語音輸出</td><td><b>MAX98357A</b> I²S Class-D 擴大機(預留 TTS 語音回覆)</td></tr>
     <tr><td>資料儲存</td><td>microSD(SPI,與 TFT / nRF24 共匯流排)</td></tr>
-    <tr><td>電源</td><td>2S 鋰電池 → 降壓模組 5 V → 雙 LDO 分軌(詳見 §4.1)</td></tr>
-  </table></div>
-
-  <h3>2.3 飛行模式定義</h3>
-  <p>模式由兩顆三段開關組合編碼:<code>mode = SW_A × 10 + SW_B</code>(各 0/1/2),共 9 個有效值。<b>編碼為兩位數而非連續整數</b>,保留位數語意。</p>
-  <div class="table-scroll"><table>
-    <tr><th>編碼</th><th>名稱</th><th>說明</th><th>狀態</th></tr>
-    <tr><td><code>00</code></td><td>安全 / 校準</td><td>馬達鎖定;可觸發 IMU 快速 / 完整校準與 PID 調參</td><td class="st-done">已完成</td></tr>
-    <tr><td><code>01</code></td><td>手動自穩</td><td>搖桿設定目標角度,PID 維持姿態(目前唯一可飛模式)</td><td class="st-done">已完成</td></tr>
-    <tr><td><code>02</code></td><td>GPS 定點導航</td><td>自動飛向目標座標;導航數學與狀態機完成,待接入 PID</td><td class="st-part">部分完成</td></tr>
-    <tr><td><code>10</code></td><td>語音控制</td><td>雲端 STT + LLM 指令解析;辨識管線已驗證,待接入控制鏈</td><td class="st-part">部分完成</td></tr>
-    <tr><td><code>11</code></td><td>PC 控制</td><td>USB Serial 透明橋接,由電腦端程式控制</td><td class="st-todo">規劃中</td></tr>
-    <tr><td><code>12</code> <code>20</code> <code>21</code> <code>22</code></td><td>預留</td><td>—</td><td class="st-todo">—</td></tr>
+    <tr><td>電源</td><td>2S 鋰電池 → 降壓模組 5 V → 雙 LDO 分軌(詳見硬體設計章)</td></tr>
   </table></div>
 </section>
 
-<!-- ============ 3. 系統架構 ============ -->
-<section id="arch">
-  <h2><span class="no">3.</span>系統架構</h2>
-  <p>系統由三個 MCU 節點構成:地面站(ESP32-S3)、飛行控制器(ESP32)與獨立影像節點(ESP32-CAM)。主控制鏈路使用 nRF24L01+ 2.4 GHz 專屬通道;語音辨識與影像串流使用 WiFi,與控制鏈路在頻段上分時使用以避免干擾。<b>點擊下圖任一元件可檢視其技術說明與設計考量。</b></p>
-
-  <div class="arch">
-    <div class="arch-col col-handle">
-      <h4>地面站(手把 V2-A)</h4>
-      <div class="node" data-k="s3">ESP32-S3 N16R8 <small>主控:UI / 通訊 / 語音前端</small></div>
-      <div class="node" data-k="tft">TFT 顯示器 ILI9341 <small>SPI 40 MHz・操作介面與遙測顯示</small></div>
-      <div class="node" data-k="joy">操縱輸入組 <small>搖桿 ×2・三段開關 ×2・肩鈕 ×2</small></div>
-      <div class="node" data-k="mic">INMP441 麥克風 <small>I²S・語音指令輸入</small></div>
-      <div class="node" data-k="spk">MAX98357A 擴大機 <small>I²S・語音回覆(預留)</small></div>
-      <div class="node" data-k="pwr">雙 LDO 電源模組 <small>AMS1117 + LD1117 分軌</small></div>
-      <div class="node cloud" data-k="cloud">雲端推論服務(WiFi / TLS) <small>Whisper STT + LLM 指令解析</small></div>
-    </div>
-
-    <div class="arch-link">
-      <b>nRF24L01+</b><br>2.4 GHz CH 88<br>↓ Signal 12 B @ 50 Hz<br>↑ Telemetry 20 B<br>(ACK payload)
-    </div>
-
-    <div class="arch-col col-drone">
-      <h4>飛行控制器(機載)</h4>
-      <div class="node" data-k="fc">ESP32 飛控主程式 <small>濾波・PID・混控・導航狀態機</small></div>
-      <div class="node" data-k="imu">MPU-6050 IMU <small>I²C・姿態量測來源</small></div>
-      <div class="node" data-k="gps">NEO-6M GPS <small>UART・定位與導航</small></div>
-      <div class="node" data-k="baro">BMP280 / VL53L0X ×2 <small>氣壓定高・雷射近距(預留)</small></div>
-      <div class="node" data-k="mag">QMC5883 磁力計 <small>絕對航向・抑制陀螺漂移</small></div>
-      <div class="node" data-k="motor">動力輸出 ×4 <small>MOSFET PWM・X 型混控</small></div>
-      <div class="node" data-k="cam">ESP32-CAM <small>獨立節點・WiFi 即時影像</small></div>
-    </div>
+<section>
+  <h2><span class="no">3.</span>報告章節</h2>
+  <div class="chapter-cards">
+    <a href="architecture.html">
+      <div class="ch-no">CHAPTER A</div>
+      <h3>系統架構</h3>
+      <p>三 MCU 節點之系統拓樸(互動圖)、軟體程式架構與模組分解、nRF24 通訊協定封包格式。</p>
+    </a>
+    <a href="hardware.html">
+      <div class="ch-no">CHAPTER B</div>
+      <h3>硬體設計</h3>
+      <p>雙 LDO 分軌電源架構與設計緣由、地面站與飛行控制器完整腳位配置。</p>
+    </a>
+    <a href="control.html">
+      <div class="ch-no">CHAPTER C</div>
+      <h3>飛控與校準</h3>
+      <p>飛行模式與安全機制、姿態估計、PID 控制與線上調參、IMU 校準系統 —— 開發過程中最費工的部分,完整記錄。</p>
+    </a>
+    <a href="voice.html">
+      <div class="ch-no">CHAPTER D</div>
+      <h3>語音子系統</h3>
+      <p>Mode 10 語音指令管線:I²S 錄音、雲端 Whisper 辨識、LLM 指令解析與工程處理要點。</p>
+    </a>
+    <a href="testing.html">
+      <div class="ch-no">CHAPTER E</div>
+      <h3>測試與驗證</h3>
+      <p>系統級問題解決紀錄(I-01 ~ I-08)、未來工作規劃、參考資料。</p>
+    </a>
   </div>
-
-  <div class="arch-detail" id="archDetail">
-    <h4>元件技術說明</h4>
-    <p>點選上方任一元件,此處將顯示其功能定位、介面規格與相關設計考量。</p>
-  </div>
-</section>
-
-<!-- ============ 4. 硬體設計 ============ -->
-<section id="hw">
-  <h2><span class="no">4.</span>硬體設計</h2>
-
-  <h3>4.1 地面站電源架構</h3>
-  <p>初版設計中所有 3.3 V 負載均由 ESP32-S3 模組板載穩壓器供電。實測發現該穩壓器(額定約 300 mA)無法承受 WiFi 射頻啟動之瞬時電流(約 400 mA),導致欠壓重啟(brown-out)。重新設計後採<b>雙穩壓器分軌架構</b>:晶片與周邊各自擁有獨立 3.3 V 軌,僅共地,射頻電流尖峰不再影響周邊供電品質。</p>
-
-  <div class="diagram">
-    <svg viewBox="0 0 860 330" font-family="'Noto Sans TC',sans-serif">
-      <defs>
-        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-          <path d="M0 0 L10 5 L0 10 z" fill="#94a3b5"/>
-        </marker>
-      </defs>
-      <!-- 電池 -->
-      <rect x="20" y="120" width="130" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
-      <text x="85" y="144" fill="#e8edf3" font-size="14" text-anchor="middle" font-weight="bold">2S 鋰電池</text>
-      <text x="85" y="163" fill="#94a3b5" font-size="11.5" text-anchor="middle">6.6 – 8.4 V</text>
-      <!-- buck -->
-      <rect x="205" y="120" width="130" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
-      <text x="270" y="144" fill="#e8edf3" font-size="14" text-anchor="middle" font-weight="bold">降壓模組</text>
-      <text x="270" y="163" fill="#94a3b5" font-size="11.5" text-anchor="middle">Buck → 5 V</text>
-      <line x1="150" y1="148" x2="200" y2="148" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar)"/>
-      <!-- 分軌點 -->
-      <line x1="335" y1="148" x2="395" y2="148" stroke="#e0a432" stroke-width="2"/>
-      <circle cx="395" cy="148" r="4" fill="#e0a432"/>
-      <text x="367" y="138" fill="#e0a432" font-size="11.5" text-anchor="middle">5 V 軌</text>
-      <!-- 上路: AMS1117 -->
-      <line x1="395" y1="148" x2="395" y2="70" stroke="#e0a432" stroke-width="2"/>
-      <line x1="395" y1="70" x2="450" y2="70" stroke="#e0a432" stroke-width="2" marker-end="url(#ar)"/>
-      <rect x="455" y="42" width="150" height="56" rx="8" fill="#1b232e" stroke="#4d9fff"/>
-      <text x="530" y="66" fill="#4d9fff" font-size="13.5" text-anchor="middle" font-weight="bold">板載 AMS1117</text>
-      <text x="530" y="84" fill="#94a3b5" font-size="11.5" text-anchor="middle">1 A・3.3 V(晶片軌)</text>
-      <line x1="605" y1="70" x2="660" y2="70" stroke="#4d9fff" stroke-width="2" marker-end="url(#ar)"/>
-      <rect x="665" y="42" width="170" height="56" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
-      <text x="750" y="66" fill="#e8edf3" font-size="13.5" text-anchor="middle" font-weight="bold">ESP32-S3 晶片</text>
-      <text x="750" y="84" fill="#94a3b5" font-size="11.5" text-anchor="middle">含 WiFi RF(峰值 ≈ 400 mA)</text>
-      <!-- 下路: LD1117 -->
-      <line x1="395" y1="148" x2="395" y2="226" stroke="#e0a432" stroke-width="2"/>
-      <line x1="395" y1="226" x2="450" y2="226" stroke="#e0a432" stroke-width="2" marker-end="url(#ar)"/>
-      <rect x="455" y="198" width="150" height="56" rx="8" fill="#1b232e" stroke="#41c46a"/>
-      <text x="530" y="222" fill="#41c46a" font-size="13.5" text-anchor="middle" font-weight="bold">外掛 LD1117</text>
-      <text x="530" y="240" fill="#94a3b5" font-size="11.5" text-anchor="middle">1 A・3.3 V(周邊軌)+ 100 µF</text>
-      <line x1="605" y1="226" x2="660" y2="226" stroke="#41c46a" stroke-width="2" marker-end="url(#ar)"/>
-      <rect x="665" y="186" width="170" height="80" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
-      <text x="750" y="208" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">周邊負載</text>
-      <text x="750" y="228" fill="#94a3b5" font-size="11.5" text-anchor="middle">TFT・nRF24L01+</text>
-      <text x="750" y="246" fill="#94a3b5" font-size="11.5" text-anchor="middle">INMP441・microSD</text>
-      <!-- USB -->
-      <rect x="20" y="32" width="130" height="50" rx="8" fill="#1b232e" stroke="#f06058" stroke-dasharray="5 4"/>
-      <text x="85" y="53" fill="#f06058" font-size="13" text-anchor="middle" font-weight="bold">USB 5 V</text>
-      <text x="85" y="71" fill="#94a3b5" font-size="11" text-anchor="middle">僅燒錄 / 除錯時</text>
-      <line x1="150" y1="57" x2="280" y2="57" stroke="#f06058" stroke-width="1.4" stroke-dasharray="5 4"/>
-      <line x1="280" y1="57" x2="450" y2="62" stroke="#f06058" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar)"/>
-      <!-- 互斥規則 -->
-      <rect x="20" y="282" width="815" height="36" rx="8" fill="rgba(240,96,88,.08)" stroke="#f06058" stroke-dasharray="5 4"/>
-      <text x="427" y="305" fill="#f06058" font-size="13" text-anchor="middle" font-weight="bold">操作限制:USB 與電池電源互斥,嚴禁同時連接(兩穩壓器輸出並聯將產生反向灌流,可能損壞 USB 主機端)</text>
-    </svg>
-    <div class="cap">圖 4-1 地面站雙穩壓器分軌電源架構</div>
-  </div>
-
-  <p>本架構之直接效益:WiFi 啟動與發射期間,周邊軌電壓不受晶片軌負載變動影響,TFT 顯示器閃爍與 nRF24 通訊不穩定問題隨之消除。操作程序上,韌體燒錄時僅接 USB(電池斷開),飛行與整合測試時僅接電池(USB 斷開);此限制同時意味<b>序列埠監看與周邊(TFT / 麥克風)無法同時使用</b>,故所有執行期狀態與錯誤訊息均設計為顯示於 TFT。</p>
-
-  <h3>4.2 地面站腳位配置(ESP32-S3)</h3>
-  <p>SPI 匯流排由 TFT、nRF24L01+ 與 microSD 三裝置共用(<code>bus_shared</code> 模式,各自獨立 CS);I²S 匯流排由麥克風與擴大機共用 BCLK / WS 時脈。</p>
-  <div class="table-scroll"><table>
-    <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
-    <tr><td rowspan="4">類比輸入</td><td>左搖桿 Y(油門)</td><td><code>1</code></td><td>移除回中彈簧,ADC 反相校正</td></tr>
-    <tr><td>右搖桿 Y(俯仰)</td><td><code>4</code></td><td>ADC 反相校正</td></tr>
-    <tr><td>左搖桿 X(偏航,可選)</td><td><code>2</code></td><td>預留,預設由肩鈕控制偏航</td></tr>
-    <tr><td>右搖桿 X(翻滾)</td><td><code>10</code></td><td>預留接線</td></tr>
-    <tr><td rowspan="3">數位輸入</td><td>三段開關 SW_A / SW_B</td><td><code>5</code> / <code>6</code></td><td>模式編碼十位 / 個位</td></tr>
-    <tr><td>選單鍵</td><td><code>7</code></td><td>內部上拉</td></tr>
-    <tr><td>左 / 右肩鈕</td><td><code>8</code> / <code>9</code></td><td>左肩鈕兼語音 PTT 鍵</td></tr>
-    <tr><td rowspan="3">共用 SPI</td><td>SCK / MOSI / MISO</td><td><code>38</code> / <code>39</code> / <code>40</code></td><td>TFT 40 MHz・nRF24・SD 共用</td></tr>
-    <tr><td>TFT CS / DC / RST</td><td><code>48</code> / <code>21</code> / <code>16</code></td><td>ILI9341,背光直接 3.3 V 常亮</td></tr>
-    <tr><td>nRF24 CE / CSN・SD CS</td><td><code>41</code> / <code>42</code>・<code>47</code></td><td>—</td></tr>
-    <tr><td rowspan="2">I²S 音訊</td><td>BCLK / WS / DOUT / DIN</td><td><code>11</code> / <code>12</code> / <code>13</code> / <code>14</code></td><td>DOUT→擴大機,DIN←麥克風</td></tr>
-    <tr><td>擴大機 SD(shutdown)</td><td><code>18</code></td><td>開機即拉低靜音,播放時方致能</td></tr>
-  </table></div>
-
-  <h3>4.3 飛行控制器腳位配置(ESP32)</h3>
-  <div class="table-scroll"><table>
-    <tr><th>功能群</th><th>訊號</th><th>GPIO</th><th>備註</th></tr>
-    <tr><td rowspan="2">無線通訊</td><td>nRF24 CE / CSN</td><td><code>4</code> / <code>5</code></td><td rowspan="2">VSPI(SCK 18 / MISO 19 / MOSI 23)</td></tr>
-    <tr><td>SPI 匯流排</td><td><code>18</code> / <code>19</code> / <code>23</code></td></tr>
-    <tr><td>感測器匯流排</td><td>I²C SDA / SCL</td><td><code>21</code> / <code>22</code></td><td>100 kHz:MPU-6050、BMP280(0x76)、TCA9548A(0x70)、QMC5883(0x0D / 0x2C 自動偵測)</td></tr>
-    <tr><td>衛星定位</td><td>UART2 RX / TX</td><td><code>33</code> / <code>32</code></td><td>NEO-6M @ 9600 bps</td></tr>
-    <tr><td rowspan="2">動力輸出</td><td>M1 前左(CW)/ M2 前右(CCW)</td><td><code>25</code> / <code>26</code></td><td rowspan="2">MOSFET PWM,X 型配置</td></tr>
-    <tr><td>M3 後左(CCW)/ M4 後右(CW)</td><td><code>27</code> / <code>14</code></td></tr>
-    <tr><td>電源監測</td><td>電池分壓 ADC</td><td><code>34</code></td><td>分壓比 4.0(30k + 10k)</td></tr>
-  </table></div>
-</section>
-
-<!-- ============ 5. 通訊協定 ============ -->
-<section id="proto">
-  <h2><span class="no">5.</span>通訊協定</h2>
-  <p>控制鏈路採 nRF24L01+ Enhanced ShockBurst,通道 88(2.488 GHz),自訂 5-byte 管線位址(避開函式庫常見預設值,降低同頻干擾)。地面站以約 50 Hz 發送指令封包;遙測資料以 <b>ACK payload</b> 機制搭載於確認封包回傳,不佔用額外傳輸時隙。</p>
-
-  <h3>5.1 下行封包 Signal(地面站 → 飛行控制器,12 bytes)</h3>
-  <div class="table-scroll"><table>
-    <tr><th>欄位</th><th>型別</th><th>說明</th></tr>
-    <tr><td><code>throttle / pitch / roll / yaw</code></td><td>uint8 × 4</td><td>搖桿值 0–255,中位 127</td></tr>
-    <tr><td><code>mode</code></td><td>uint8</td><td>飛行模式兩位數編碼(§2.3)</td></tr>
-    <tr><td><code>flags</code></td><td>uint8</td><td>bit 0:完整校準觸發;其餘保留</td></tr>
-    <tr><td><code>paramID</code></td><td>uint8</td><td>線上調參:1–5 = Kp/Ki/Kd/Kp_yaw/Ki_yaw;100/101/102 = 快速校準/完整校準/PID 存檔</td></tr>
-    <tr><td><code>paramVal</code></td><td>float</td><td>參數值(paramID ≠ 0 時有效;接收端以值變化去重,避免 50 Hz 重複觸發)</td></tr>
-  </table></div>
-
-  <h3>5.2 上行封包 Telemetry(飛行控制器 → 地面站,20 bytes)</h3>
-  <div class="table-scroll"><table>
-    <tr><th>欄位</th><th>型別</th><th>說明</th></tr>
-    <tr><td><code>roll / pitch</code></td><td>int16 × 2</td><td>姿態角 × 10(0.1° 解析度)</td></tr>
-    <tr><td><code>yawRate</code></td><td>int16</td><td>偏航角速度 × 10(°/s)</td></tr>
-    <tr><td><code>altitude_dm</code></td><td>int16</td><td>相對高度(分米),範圍 ±3276.7 m</td></tr>
-    <tr><td><code>heading</code></td><td>int16</td><td>絕對航向 × 10(0–3599,0 = 北)</td></tr>
-    <tr><td><code>status</code></td><td>uint8</td><td>位元旗標:armed / 校準中 / 校準失敗 / GPS fix</td></tr>
-    <tr><td><code>satCount</code></td><td>uint8</td><td>GPS 可見衛星數</td></tr>
-    <tr><td><code>lat_e7 / lon_e7</code></td><td>int32 × 2</td><td>經緯度 × 10⁷(約 1.1 cm 解析度)</td></tr>
-  </table></div>
-  <p>封包大小 20 bytes,符合 nRF24 ACK payload 上限(32 bytes)並保留擴充空間。失聯保護:地面站訊號中斷超過 1 秒,飛行控制器立即將油門歸零。</p>
-</section>
-
-<!-- ============ 6. 飛控軟體 ============ -->
-<section id="fc">
-  <h2><span class="no">6.</span>飛行控制軟體</h2>
-
-  <h3>6.1 姿態估計 — 互補濾波</h3>
-  <p>陀螺儀積分短期精確但長期漂移;加速度計長期穩定但受振動干擾。互補濾波以高通 / 低通互補方式融合兩者:</p>
-  <div class="formula">roll&#8320;  = 0.98 × (roll  + gyro_roll × dt) + 0.02 × acc_roll
-pitch&#8320; = 0.98 × (pitch + gyro_pitch × dt) + 0.02 × acc_pitch</div>
-  <p>偏航軸無重力參考,採相同結構但以<b>磁力計絕對航向</b>作為 2% 修正源,抑制陀螺積分漂移;無磁力計時退化為純積分模式。</p>
-
-  <h3>6.2 姿態控制 — 角度環 PID</h3>
-  <p>搖桿值線性映射為目標角度(最大傾角 ±20°,經實飛測試由 ±15° 上調):</p>
-  <div class="formula">setpoint = (stick − 127) × (MAX_ANGLE / 127)        // MAX_ANGLE = 20°
-output   = Kp·e + Ki·∫e·dt + Kd·de/dt              // e = setpoint − 量測角</div>
-  <div class="table-scroll"><table>
-    <tr><th>軸</th><th>Kp</th><th>Ki</th><th>Kd</th><th>備註</th></tr>
-    <tr><td>Roll / Pitch(共用)</td><td>1.0</td><td>0.01</td><td>0.3</td><td rowspan="2">可由地面站選單線上調整,確認後寫入 NVS 永久保存,重新上電自動載入</td></tr>
-    <tr><td>Yaw(角速度環)</td><td>0.8</td><td>0.01</td><td>—</td></tr>
-  </table></div>
-
-  <h3>6.3 X 型四馬達混控</h3>
-  <div class="formula">M1(前左 CW)  = T + pitchOut + rollOut − yawOut
-M2(前右 CCW) = T + pitchOut − rollOut + yawOut
-M3(後左 CCW) = T − pitchOut + rollOut + yawOut
-M4(後右 CW)  = T − pitchOut − rollOut − yawOut
-各輸出限幅於 [1000, 2000]</div>
-
-  <h3>6.4 校準系統</h3>
-  <ul>
-    <li><b>快速校準</b>:靜置取陀螺零偏;<b>完整校準</b>:另含水平基準(加速度計姿態零點)。</li>
-    <li>校準期間執行<b>動作偵測</b>:量測值波動超過閾值即判定校準失敗、拒絕寫入,防止手持晃動產生錯誤基準。</li>
-    <li>校準結果與 PID 參數均存於 ESP32 NVS(非揮發性儲存),斷電不遺失;兩種校準均可由地面站選單遠端觸發。</li>
-  </ul>
-
-  <h3>6.5 開發驗證策略</h3>
-  <p>飛控程式採三階段獨立驗證:<b>Gyro</b>(僅驗證感測器讀值與姿態解算)→ <b>Manual</b>(搖桿直通馬達,驗證通訊與混控)→ <b>PID</b>(閉環自穩)。每階段為獨立可燒錄程式,問題定位範圍明確;此外另維護 28 支單元測試程式(各感測器、TFT、I²S、WiFi 最小化測試),系統級問題均可快速降階重現。</p>
-</section>
-
-<!-- ============ 7. 語音子系統 ============ -->
-<section id="voice">
-  <h2><span class="no">7.</span>AI 語音控制子系統(Mode 10)</h2>
-  <p>採 Push-to-Talk 操作模型:按住左肩鈕錄音、放開即觸發辨識管線。音訊以 16 kHz / 16-bit 單聲道取樣,直接寫入 PSRAM 環形緩衝(上限 10 秒,約 320 KB),結束後組裝 44-byte WAV 標頭,經 TLS 上傳雲端。</p>
-
-  <div class="diagram">
-    <svg viewBox="0 0 880 150" font-family="'Noto Sans TC',sans-serif">
-      <defs>
-        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-          <path d="M0 0 L10 5 L0 10 z" fill="#94a3b5"/>
-        </marker>
-      </defs>
-      <g>
-        <rect x="10" y="35" width="120" height="62" rx="8" fill="#1b232e" stroke="#4d9fff"/>
-        <text x="70" y="60" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">INMP441 錄音</text>
-        <text x="70" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">I²S 16 kHz PCM</text>
-        <line x1="130" y1="66" x2="160" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
-        <rect x="163" y="35" width="120" height="62" rx="8" fill="#1b232e" stroke="#4d9fff"/>
-        <text x="223" y="60" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">PSRAM 緩衝</text>
-        <text x="223" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">≤ 320 KB + WAV 標頭</text>
-        <line x1="283" y1="66" x2="313" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
-        <rect x="316" y="35" width="130" height="62" rx="8" fill="#1b232e" stroke="#b48cff"/>
-        <text x="381" y="60" fill="#b48cff" font-size="13" text-anchor="middle" font-weight="bold">Whisper STT</text>
-        <text x="381" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">large-v3-turbo・zh</text>
-        <line x1="446" y1="66" x2="476" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
-        <rect x="479" y="35" width="130" height="62" rx="8" fill="#1b232e" stroke="#b48cff"/>
-        <text x="544" y="60" fill="#b48cff" font-size="13" text-anchor="middle" font-weight="bold">LLM 指令解析</text>
-        <text x="544" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">Llama-3.3-70B・few-shot</text>
-        <line x1="609" y1="66" x2="639" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
-        <rect x="642" y="35" width="110" height="62" rx="8" fill="#1b232e" stroke="#41c46a"/>
-        <text x="697" y="60" fill="#41c46a" font-size="13" text-anchor="middle" font-weight="bold">JSON 指令</text>
-        <text x="697" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">action / 參數</text>
-        <line x1="752" y1="66" x2="782" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
-        <rect x="785" y="35" width="85" height="62" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
-        <text x="827" y="60" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">TFT 顯示</text>
-        <text x="827" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">→ nRF24*</text>
-      </g>
-      <text x="440" y="130" fill="#94a3b5" font-size="11.5" text-anchor="middle">* 指令 → 飛行控制鏈路之銜接為下一階段工作(§9)</text>
-    </svg>
-    <div class="cap">圖 7-1 Mode 10 語音指令辨識管線</div>
-  </div>
-
-  <h3>7.1 指令集定義</h3>
-  <p>LLM 以系統提示詞 + few-shot 範例約束輸出為固定結構 JSON(<code>response_format: json_object</code>,temperature 0.1):</p>
-  <div class="table-scroll"><table>
-    <tr><th>action</th><th>參數</th><th>對應語音範例</th></tr>
-    <tr><td><code>takeoff</code></td><td>—</td><td>「起飛」「飛起來」</td></tr>
-    <tr><td><code>land</code></td><td>—</td><td>「降落」「下來」</td></tr>
-    <tr><td><code>move</code></td><td>direction(6 向)、duration_sec(1–10)</td><td>「向前飛三秒」</td></tr>
-    <tr><td><code>stop</code></td><td>—</td><td>「停下來」「懸停」</td></tr>
-    <tr><td><code>mode</code></td><td>mode(0 / 1 / 2)</td><td>「切到 GPS 模式」</td></tr>
-    <tr><td><code>unknown</code></td><td>—</td><td>無法解析之輸入(安全預設)</td></tr>
-  </table></div>
-
-  <h3>7.2 工程處理要點</h3>
-  <ul>
-    <li><b>前處理</b>:Whisper 輸出常含結尾標點(「起飛。」),解析前先去除前後空白與中英文標點,避免與 few-shot 範例失配。</li>
-    <li><b>強健性</b>:錄音振幅低於閾值不上傳;WiFi 失聯自動重連;各階段失敗均於 TFT 顯示具體錯誤(HTTP 狀態碼 / 階段名),且任一狀態下可立即重新錄音。</li>
-    <li><b>服務選型</b>:曾評估以多模態模型單次完成 STT + 解析(延遲較低),但免費層級速率限制(15–30 RPM)無法支撐連續測試,最終採兩段式管線將負載分散於不同服務之獨立額度。</li>
-    <li><b>音訊雜訊</b>:擴大機 shutdown 腳於開機即拉低,消除 I²S 時脈雜訊被放大之問題;憑證(WiFi / API 金鑰)隔離於 <code>secrets.h</code> 並排除於版本控制之外。</li>
-  </ul>
-</section>
-
-<!-- ============ 8. 測試與驗證 ============ -->
-<section id="test">
-  <h2><span class="no">8.</span>測試與問題解決紀錄</h2>
-  <p>下表彙整開發期間之系統級問題、根因分析方法與處置結果。多數問題之定位採<b>對照實驗法</b>:固定其餘變因、單獨替換疑似元件,以重現性確認根因。</p>
-  <div class="table-scroll"><table>
-    <tr><th>編號</th><th>問題現象</th><th>根因分析</th><th>處置</th><th>狀態</th></tr>
-    <tr>
-      <td><code>I-01</code></td>
-      <td>ESP32-S3 執行 WiFi 初始化即無限重啟,最簡 5 行測試程式亦重現</td>
-      <td>同一 USB 線 / 同一程式對照測試:經典 ESP32(AMS1117 1 A)正常、S3 模組必然重啟 → 鎖定 S3 板載穩壓器(約 300 mA)不足以供應 WiFi RF 啟動電流(約 400 mA)</td>
-      <td>更換為 1 A 穩壓器之開發板,並增設 LD1117 獨立周邊軌(§4.1)</td>
-      <td class="st-done">已結案</td>
-    </tr>
-    <tr>
-      <td><code>I-02</code></td>
-      <td>SD 卡模組接入後 nRF24 通訊完全失效</td>
-      <td>SD 模組之電平轉換晶片於 CS 未選取時仍驅動 MISO 線,佔用共用 SPI 匯流排</td>
-      <td>暫時停用 SD;電源架構更新後重新驗證中,必要時改用無電平轉換之 3.3 V 裸模組</td>
-      <td class="st-part">驗證中</td>
-    </tr>
-    <tr>
-      <td><code>I-03</code></td>
-      <td>nRF24 以最大發射功率工作時系統偶發重啟</td>
-      <td>PA_MAX 發射瞬間電流尖峰致穩壓器輸出電壓下垂</td>
-      <td>發射功率暫降至 PA_MIN(桌面測試距離足夠);電源改善後將復測高功率档位</td>
-      <td class="st-part">已緩解</td>
-    </tr>
-    <tr>
-      <td><code>I-04</code></td>
-      <td>喇叭於開機及待機時輸出雜訊</td>
-      <td>MAX98357A shutdown 腳浮空導致擴大機隨機致能,放大 I²S 匯流排時脈串擾</td>
-      <td>開機即將 SD 腳設為輸出並拉低,播放時方致能</td>
-      <td class="st-done">已結案</td>
-    </tr>
-    <tr>
-      <td><code>I-05</code></td>
-      <td>雲端推論服務回應 HTTP 429(速率限制)</td>
-      <td>免費層級額度(15–30 請求/分鐘)無法支撐連續整合測試</td>
-      <td>STT 與 LLM 解析拆至不同服務之獨立額度;中期規劃改用本地離線辨識(§9)</td>
-      <td class="st-part">已緩解</td>
-    </tr>
-    <tr>
-      <td><code>I-06</code></td>
-      <td>語音正確轉錄為「起飛」但 LLM 回傳 unknown</td>
-      <td>STT 輸出附帶標點符號,與 few-shot 範例字面失配</td>
-      <td>解析前正規化:去除前後空白與中英文標點</td>
-      <td class="st-done">已結案</td>
-    </tr>
-    <tr>
-      <td><code>I-07</code></td>
-      <td>ESP32-S3 原生 USB CDC 序列埠於部分主機列舉不穩</td>
-      <td>S3 原生 USB 列舉時序與主機端驅動相依</td>
-      <td>所有執行期狀態改以 TFT 顯示,序列埠僅作燒錄輔助(與電源互斥限制一致)</td>
-      <td class="st-done">已結案</td>
-    </tr>
-    <tr>
-      <td><code>I-08</code></td>
-      <td>起飛瞬間機體向固定方向偏移</td>
-      <td>IMU 水平基準偏差(校準時機體未完全水平)</td>
-      <td>完整校準程序加入動作偵測拒寫機制;起飛前執行完整校準</td>
-      <td class="st-part">持續觀察</td>
-    </tr>
-  </table></div>
-</section>
-
-<!-- ============ 9. 未來工作 ============ -->
-<section id="future">
-  <h2><span class="no">9.</span>未來工作</h2>
-  <div class="table-scroll"><table>
-    <tr><th>項目</th><th>內容</th><th>優先序</th></tr>
-    <tr><td>本地離線語音辨識</td><td>導入 Espressif ESP-SR(AFE + MultiNet),以拼音定義中文命令詞於裝置端直接辨識;消除網路依賴、速率限制與雲端延遲(目標 &lt; 1 s)。需自行打包中文模型(mn6_cn)至 flash model 分區</td><td>高</td></tr>
-    <tr><td>語音指令 → 控制鏈路銜接</td><td>將 Mode 10 解析所得 action 轉換為 Signal 封包序列,經 nRF24 注入飛行控制(含逾時回復搖桿控制之安全機制)</td><td>高</td></tr>
-    <tr><td>GPS 導航閉環</td><td>Mode 02 導航輸出(目標 roll / pitch)接入 PID 設定點,完成定點飛行閉環;需戶外定位精度驗證</td><td>中</td></tr>
-    <tr><td>氣壓定高</td><td>BMP280 高度估計 + 油門軸 PID,實現高度保持;為自動降落之前置功能</td><td>中</td></tr>
-    <tr><td>SD 卡資料記錄</td><td>新電源架構下重新驗證 SPI 共存;啟用後支援飛行紀錄與音訊播放</td><td>中</td></tr>
-    <tr><td>頭部追蹤雲台</td><td>手機 IMU(DeviceOrientation API)→ WiFi → 機載雙伺服雲台;原型已驗證,待整合至主程式</td><td>低</td></tr>
-  </table></div>
-</section>
-
-<!-- ============ 10. 參考資料 ============ -->
-<section id="refs" class="refs">
-  <h2><span class="no">10.</span>參考資料</h2>
-  <ol>
-    <li>Espressif Systems, <i>ESP32-S3 Technical Reference Manual</i>. <a href="https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf" target="_blank">espressif.com</a></li>
-    <li>Nordic Semiconductor, <i>nRF24L01+ Single Chip 2.4GHz Transceiver Product Specification v1.0</i>. <a href="https://www.nordicsemi.com/Products/nRF24-series" target="_blank">nordicsemi.com</a></li>
-    <li>InvenSense (TDK), <i>MPU-6000 and MPU-6050 Product Specification Revision 3.4</i>. <a href="https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/" target="_blank">invensense.tdk.com</a></li>
-    <li>STMicroelectronics, <i>LD1117 Series — Adjustable and Fixed Low Drop Positive Voltage Regulator</i>, Datasheet. <a href="https://www.st.com/en/power-management/ld1117.html" target="_blank">st.com</a></li>
-    <li>Espressif Systems, <i>ESP-SR Speech Recognition Framework Documentation</i>(AFE / WakeNet / MultiNet). <a href="https://docs.espressif.com/projects/esp-sr/zh_CN/latest/esp32s3/" target="_blank">docs.espressif.com</a></li>
-    <li>Groq Inc., <i>GroqCloud API Documentation — Speech to Text (Whisper) / Chat Completions</i>. <a href="https://console.groq.com/docs" target="_blank">console.groq.com/docs</a></li>
-    <li>Bosch Sensortec, <i>BMP280 Digital Pressure Sensor Datasheet</i>. <a href="https://www.bosch-sensortec.com/products/environmental-sensors/pressure-sensors/bmp280/" target="_blank">bosch-sensortec.com</a></li>
-    <li>u-blox, <i>NEO-6 u-blox 6 GPS Modules Data Sheet</i>. <a href="https://www.u-blox.com/en/product/neo-6-series" target="_blank">u-blox.com</a></li>
-    <li>lovyan03, <i>LovyanGFX — LCD Graphics Driver for Embedded Devices</i>, GitHub. <a href="https://github.com/lovyan03/LovyanGFX" target="_blank">github.com/lovyan03/LovyanGFX</a></li>
-    <li>nRF24, <i>RF24 — Optimized Radio Library for nRF24L01</i>, GitHub. <a href="https://github.com/nRF24/RF24" target="_blank">github.com/nRF24/RF24</a></li>
-  </ol>
 </section>
 
 <footer>
   四軸無人機飛行控制系統技術報告 · 2026<br>
   原始碼:<a href="https://github.com/avav10985/flightflight" target="_blank">github.com/avav10985/flightflight</a>
 </footer>
-
-<script>
-// ===== 架構圖點擊細節 =====
-const ARCH_INFO = {
-  s3: ["ESP32-S3 N16R8 — 地面站主控制器",
-    "雙核心 Xtensa LX7 @ 240 MHz、16 MB Flash、8 MB Octal PSRAM。負責 50 Hz 控制迴圈(搖桿取樣 → 封包發送 → 遙測接收)、TFT 介面繪製,以及 Mode 10 之音訊擷取與雲端通訊。PSRAM 用於語音錄音緩衝(10 秒 @ 16 kHz ≈ 320 KB)。",
-    "選型備註:初版採用之低價 S3 模組板載穩壓器僅約 300 mA,無法支撐 WiFi 工作,經對照實驗確認後更換為 1 A 穩壓器板型(I-01)。"],
-  tft: ["TFT 顯示器(ILI9341,240×320)",
-    "SPI @ 40 MHz,LovyanGFX 驅動,內嵌中文字型。顯示飛行姿態、高度、航向、GPS 狀態、模式與 PID 調參選單。因電源互斥限制(§4.1),序列埠於整合測試時不可用,本顯示器為唯一執行期輸出通道,所有狀態與錯誤訊息均在此呈現。",
-    "介面選型:並列匯流排版本需 13 隻 GPIO,SPI 版本節省 9 隻;與 nRF24 / SD 共用匯流排,以 bus_shared 模式與獨立 CS 仲裁。"],
-  joy: ["操縱輸入組",
-    "雙軸搖桿 × 2(ADC 取樣;油門軸移除回中彈簧以保持油門位置)、三段開關 × 2(模式編碼)、肩鈕 × 2(左肩鈕兼語音 PTT)、選單鍵。",
-    "實作備註:搖桿兩軸之電氣方向與操作直覺相反,於韌體端統一反相校正;模式採兩位數編碼(00–22)而非連續整數,保留位數語意。"],
-  mic: ["INMP441 I²S MEMS 麥克風",
-    "全數位 I²S 介面輸出,16 kHz / 16-bit 單聲道取樣,直接寫入 PSRAM。數位介面可避開手把上 TFT、nRF24 與電源切換產生之類比雜訊。",
-    "與擴大機共用 I²S BCLK / WS 時脈線(GPIO 11 / 12),資料線各自獨立(DIN 14 / DOUT 13)。"],
-  spk: ["MAX98357A I²S Class-D 擴大機",
-    "預留語音回覆(TTS)輸出。shutdown 腳(GPIO 18)於開機即拉低靜音,僅於播放時致能,消除 I²S 時脈串擾被放大之雜訊(I-04)。", ""],
-  pwr: ["雙 LDO 分軌電源",
-    "2S 鋰電池 → 降壓模組 5 V → 板載 AMS1117(晶片軌)與外掛 LD1117 + 100 µF(周邊軌)。兩條 3.3 V 軌僅共地,WiFi 射頻電流尖峰不影響周邊供電。",
-    "操作限制:USB 與電池嚴禁同時連接 —— 兩穩壓器輸出並聯將產生反向灌流,可能損壞 USB 主機。燒錄時斷電池、測試時斷 USB。"],
-  cloud: ["雲端推論服務(Mode 10)",
-    "TLS 連線上傳 WAV 至 Whisper large-v3-turbo 進行中文語音辨識,轉錄文字再經 Llama-3.3-70B(few-shot + JSON 強制輸出)解析為結構化飛行指令。端到端延遲約 3 秒。",
-    "設計考量:曾評估多模態模型單次完成辨識 + 解析,但免費層速率限制無法支撐連續測試;兩段式管線將負載分散至獨立額度(I-05)。中期規劃改用 ESP-SR 本地辨識。"],
-  fc: ["飛行控制主程式(ESP32)",
-    "主迴圈:IMU 讀取 → 互補濾波姿態解算 → 角度環 PID → X 型混控 → PWM 輸出,並行處理 nRF24 收發、GPS NMEA 解析、遙測組包與導航狀態機。",
-    "驗證策略:Gyro / Manual / PID 三階段獨立程式逐層驗證(§6.5)。"],
-  imu: ["MPU-6050 慣性量測單元",
-    "三軸陀螺儀 + 三軸加速度計,I²C @ 100 kHz。互補濾波(0.98 / 0.02)融合出 roll / pitch 姿態角。",
-    "校準資料(陀螺零偏、水平基準)存於 NVS,斷電保留;校準程序含動作偵測拒寫機制(I-08)。"],
-  gps: ["NEO-6M 衛星定位模組",
-    "UART @ 9600 bps,NMEA 解析取得經緯度(×10⁷ 定點數)、衛星數與訊號強度。Mode 02 之距離 / 方位角計算與導航狀態機已完成,待接入 PID 設定點。", ""],
-  baro: ["BMP280 氣壓計 + VL53L0X 雷射測距 × 2",
-    "氣壓計提供相對高度估計(定高用);雷射測距經 TCA9548A I²C 多工器掛載兩顆(近地 / 避障用)。硬體與驅動均已就緒,等待高度控制環實作。", ""],
-  mag: ["QMC5883 磁力計(GY-271)",
-    "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
-  motor: ["動力輸出(空心杯馬達 × 4)",
-    "MOSFET PWM 直驅,X 型配置混控(§6.3),輸出限幅 [1000, 2000]。",
-    "調校紀錄:初始 PID 增益過高導致響應過敏,經實飛測試降至保守值並限制最大傾角 20°。"],
-  cam: ["ESP32-CAM 影像節點",
-    "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援飛行中調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
-};
-document.querySelectorAll(".node").forEach(n => {
-  n.addEventListener("click", () => {
-    document.querySelectorAll(".node").forEach(x => x.classList.remove("sel"));
-    n.classList.add("sel");
-    const [title, desc, extra] = ARCH_INFO[n.dataset.k];
-    const d = document.getElementById("archDetail");
-    d.innerHTML = `<h4>${title}</h4><p>${desc}</p>` + (extra ? `<div class="extra">${extra}</div>` : "");
-    if (window.innerWidth < 760) d.scrollIntoView({behavior: "smooth", block: "nearest"});
-  });
-});
-// ===== 導覽列高亮 =====
-const sections = [...document.querySelectorAll("section[id]")];
-const links = [...document.querySelectorAll("nav a")];
-window.addEventListener("scroll", () => {
-  const y = window.scrollY + 130;
-  let cur = null;
-  for (const s of sections) if (s.offsetTop <= y) cur = s;
-  links.forEach(a => a.classList.toggle("active", cur && a.getAttribute("href") === "#" + cur.id));
-});
-</script>
 </body>
 </html>
