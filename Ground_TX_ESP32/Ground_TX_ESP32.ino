@@ -1007,6 +1007,9 @@ void initMusicI2S() {
   i2s_std_config_t rx_cfg = std_cfg;
   rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
   rx_cfg.gpio_cfg.din  = (gpio_num_t)PIN_I2S_DIN;
+  // 關鍵:TX 是雙 slot(喇叭 L+R),RX 必須只收 LEFT(INMP441 L/R 接地)。
+  // 繼承 BOTH 會讓錄音 sample 之間穿插垃圾 → Whisper 聽到雜訊亂辨識
+  rx_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
   i2s_channel_init_std_mode(micRx, &rx_cfg);
   // 不在這裡 enable:錄音開始才 enable、結束 disable(避免 DMA 堆舊資料)
 #endif
