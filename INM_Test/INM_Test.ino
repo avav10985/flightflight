@@ -29,31 +29,31 @@
 #include <driver/i2s_std.h>
 #include <math.h>
 
-#define PIN_SCK         11
-#define PIN_WS          12
-#define PIN_SD          14
+#define PIN_SCK 11
+#define PIN_WS 12
+#define PIN_SD 14
 
-#define SAMPLE_RATE     16000
-#define BUF_SAMPLES     512
+#define SAMPLE_RATE 16000
+#define BUF_SAMPLES 512
 
 i2s_chan_handle_t rx_handle = NULL;
 
 void initI2S() {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  i2s_new_channel(&chan_cfg, NULL, &rx_handle);   // 只要 RX
+  i2s_new_channel(&chan_cfg, NULL, &rx_handle);  // 只要 RX
 
   i2s_std_config_t std_cfg = {};
-  std_cfg.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE);
+  std_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE);
   std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
   std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
   std_cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
   std_cfg.gpio_cfg.bclk = (gpio_num_t)PIN_SCK;
-  std_cfg.gpio_cfg.ws   = (gpio_num_t)PIN_WS;
+  std_cfg.gpio_cfg.ws = (gpio_num_t)PIN_WS;
   std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
-  std_cfg.gpio_cfg.din  = (gpio_num_t)PIN_SD;
+  std_cfg.gpio_cfg.din = (gpio_num_t)PIN_SD;
   std_cfg.gpio_cfg.invert_flags.mclk_inv = false;
   std_cfg.gpio_cfg.invert_flags.bclk_inv = false;
-  std_cfg.gpio_cfg.invert_flags.ws_inv   = false;
+  std_cfg.gpio_cfg.invert_flags.ws_inv = false;
 
   i2s_channel_init_std_mode(rx_handle, &std_cfg);
   i2s_channel_enable(rx_handle);
@@ -100,10 +100,10 @@ void loop() {
 
   // 統計 RMS 跟最大絕對值
   int32_t maxAbs = 0;
-  int64_t sumSq  = 0;
+  int64_t sumSq = 0;
   for (int i = 0; i < samples; i++) {
-    int32_t v   = buf[i] >> 14;          // 把 INMP441 32-bit 轉成有用的範圍
-    int32_t av  = v < 0 ? -v : v;
+    int32_t v = buf[i] >> 14;  // 把 INMP441 32-bit 轉成有用的範圍
+    int32_t av = v < 0 ? -v : v;
     if (av > maxAbs) maxAbs = av;
     sumSq += (int64_t)v * v;
   }
@@ -112,12 +112,12 @@ void loop() {
   // ASCII 音量條(0 ~ 5000 對應 0 ~ 50 格)
   int bar = (int)((float)rms / 5000.0f * 50.0f);
   if (bar > 50) bar = 50;
-  if (bar < 0)  bar = 0;
+  if (bar < 0) bar = 0;
 
   Serial.printf("RMS=%5ld  MAX=%5ld  |", rms, maxAbs);
-  for (int i = 0; i < bar; i++)        Serial.print("#");
-  for (int i = bar; i < 50; i++)       Serial.print(" ");
+  for (int i = 0; i < bar; i++) Serial.print("#");
+  for (int i = bar; i < 50; i++) Serial.print(" ");
   Serial.println("|");
 
-  delay(50);   // 約 20 Hz 更新
+  delay(50);  // 約 20 Hz 更新
 }
