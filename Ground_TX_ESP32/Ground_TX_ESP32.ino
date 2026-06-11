@@ -996,8 +996,11 @@ uint64_t vidAudioFed  = 0;
 uint32_t vidFrameShown = 0;
 unsigned long vidStartMs = 0;
 String   vidList[VID_MAX_FILES];
+bool     vidIsVideo[VID_MAX_FILES];   // true=/video/*.mjp,false=/music/*.wav
 int      vidCount  = 0;
 int      vidCursor = 0;
+bool     mediaPaused = false;
+unsigned long vidPauseStart = 0;
 
 int vidJpegDraw(JPEGDRAW* d) {
   tft.pushImage(d->x, d->y, d->iWidth, d->iHeight, (uint16_t*)d->pPixels);
@@ -1006,16 +1009,36 @@ int vidJpegDraw(JPEGDRAW* d) {
 
 void vidScanFiles() {
   vidCount = 0;
+  // 影片:/video/*.mjp
   File dir = SD.open("/video");
-  if (!dir) return;
-  while (vidCount < VID_MAX_FILES) {
-    File f = dir.openNextFile();
-    if (!f) break;
-    String name = f.name();
-    if (name.endsWith(".mjp") || name.endsWith(".MJP")) vidList[vidCount++] = name;
-    f.close();
+  if (dir) {
+    while (vidCount < VID_MAX_FILES) {
+      File f = dir.openNextFile();
+      if (!f) break;
+      String name = f.name();
+      if (name.endsWith(".mjp") || name.endsWith(".MJP")) {
+        vidIsVideo[vidCount] = true;
+        vidList[vidCount++]  = name;
+      }
+      f.close();
+    }
+    dir.close();
   }
-  dir.close();
+  // 音樂:/music/*.wav
+  dir = SD.open("/music");
+  if (dir) {
+    while (vidCount < VID_MAX_FILES) {
+      File f = dir.openNextFile();
+      if (!f) break;
+      String name = f.name();
+      if (name.endsWith(".wav") || name.endsWith(".WAV")) {
+        vidIsVideo[vidCount] = false;
+        vidList[vidCount++]  = name;
+      }
+      f.close();
+    }
+    dir.close();
+  }
 }
 
 void drawVideoMenu() {
@@ -1028,7 +1051,7 @@ void drawVideoMenu() {
   if (vidCount == 0) {
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     tft.setCursor(10, 100);
-    tft.print("SD /video/ 沒有 .mjp");
+    tft.print("SD /video /music 都空");
     return;
   }
   for (int i = 0; i < vidCount; i++) {
@@ -1038,18 +1061,55 @@ void drawVideoMenu() {
     tft.setTextColor(sel ? TFT_YELLOW : TFT_WHITE, sel ? TFT_DARKGREEN : TFT_BLACK);
     tft.setCursor(10, y + 3);
     tft.print(sel ? ">" : " ");
+    tft.print(vidIsVideo[i] ? "[影]" : "[樂]");
     tft.print(vidList[i]);
   }
   tft.setFont(&fonts::efontTW_14);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setCursor(5, 290);
-  tft.print("搖桿:選  OK:播  切模式:離開");
+  tft.print("搖桿:選 OK:播 ↑↓音量 ←退出");
+}
+
+// 播放中的音量提示(畫在頂部,影片下一幀若蓋到會自己消失)
+void drawVolOverlay() {
+  char buf[20];
+  snprintf(buf, sizeof(buf), " 音量 %d%% ", musicVolume);
+  tft.setFont(&fonts::efontTW_16);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setCursor(6, 4);
+  tft.print(buf);
+}
+
+// 音樂播放畫面
+void drawMusicScreen(const String& name) {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 240, 32, TFT_NAVY);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setCursor(30, 4);
+  tft.print("音樂播放中");
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setCursor(10, 110);
+  tft.println(name);
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(5, 290);
+  tft.print("↑↓音量 →暫停/繼續 ←退出");
+}
+
+// 暫停/繼續狀態顯示
+void drawPauseState() {
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(mediaPaused ? TFT_ORANGE : TFT_GREEN, TFT_BLACK);
+  tft.setCursor(90, 160);
+  tft.print(mediaPaused ? "[暫停]" : "[播放]");
 }
 
 void vidStop() {
   if (vidFile) vidFile.close();
   if (vidAud)  vidAud.close();
-  vidPlaying = false;
+  vidPlaying  = false;
+  mediaPaused = false;
   digitalWrite(PIN_AMP_SD, LOW);
 }
 
@@ -1152,20 +1212,65 @@ void exitVideoMode() {
   vidStop();
 }
 
+// 音量調整(播放中 ↑↓ 鍵)
+void mediaVolume(int delta) {
+  int v = (int)musicVolume + delta;
+  if (v < 0)   v = 0;
+  if (v > 100) v = 100;
+  musicVolume = (uint8_t)v;
+  drawVolOverlay();
+}
+
+// 暫停/繼續(→ 鍵)
+void mediaTogglePause(bool hasAudioNow) {
+  mediaPaused = !mediaPaused;
+  if (mediaPaused) {
+    vidPauseStart = millis();
+    digitalWrite(PIN_AMP_SD, LOW);            // 靜音
+  } else {
+    vidStartMs += millis() - vidPauseStart;   // millis 時鐘補償暫停時間
+    if (hasAudioNow) digitalWrite(PIN_AMP_SD, HIGH);
+  }
+}
+
 void videoModeLoop(int btnEdge) {
+  // --- 影片播放中 ---
   if (vidPlaying) {
-    if (btnEdge == BTN_BACK || btnEdge == BTN_OK) { vidStop(); drawVideoMenu(); return; }
-    vidUpdate();
+    if (btnEdge == BTN_BACK)  { vidStop(); drawVideoMenu(); return; }     // ← 退出
+    if (btnEdge == BTN_OK)    { mediaTogglePause(vidHasAudio); drawPauseState(); }  // → 暫停/繼續
+    if (btnEdge == BTN_PLUS)  mediaVolume(+10);                            // ↑ 音量
+    if (btnEdge == BTN_MINUS) mediaVolume(-10);                            // ↓ 音量
+    if (!mediaPaused) vidUpdate();
     return;
   }
-  // 選單瀏覽
+  // --- 音樂播放中(共用 ENABLE_MUSIC 的 musicPlay/musicUpdate)---
+  if (musicPlaying) {
+    if (btnEdge == BTN_BACK)  { musicStop(); mediaPaused = false; drawVideoMenu(); return; }
+    if (btnEdge == BTN_OK)    { mediaTogglePause(true); drawPauseState(); }
+    if (btnEdge == BTN_PLUS)  mediaVolume(+10);
+    if (btnEdge == BTN_MINUS) mediaVolume(-10);
+    if (!mediaPaused) {
+      musicUpdate();
+      if (!musicPlaying) { mediaPaused = false; drawVideoMenu(); }  // 播完回選單
+    }
+    return;
+  }
+  // --- 選單瀏覽 ---
   static unsigned long lastMove = 0;
   if (vidCount > 0 && millis() - lastMove > 250) {
     int p = centerMap(analogRead(J_PITCH), REV_PITCH);
     if (p > 240) { vidCursor = (vidCursor + 1) % vidCount;            drawVideoMenu(); lastMove = millis(); }
     if (p < 15)  { vidCursor = (vidCursor - 1 + vidCount) % vidCount; drawVideoMenu(); lastMove = millis(); }
   }
-  if (btnEdge == BTN_OK && vidCount > 0) vidStart(vidList[vidCursor]);
+  if (btnEdge == BTN_OK && vidCount > 0) {
+    if (vidIsVideo[vidCursor]) {
+      vidStart(vidList[vidCursor]);
+    } else {
+      String path = String("/music/") + vidList[vidCursor];
+      musicPlay(path.c_str());
+      if (musicPlaying) drawMusicScreen(vidList[vidCursor]);
+    }
+  }
 }
 #endif  // ENABLE_VIDEO_MODE20
 
