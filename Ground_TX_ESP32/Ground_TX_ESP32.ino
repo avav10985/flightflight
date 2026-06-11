@@ -632,7 +632,7 @@ void setup() {
   // 錄音緩衝(PSRAM)+ 語音管線 task 釘在核心 0(主迴圈在核心 1)
   vRecBuf = (int16_t*)heap_caps_malloc(VREC_MAXSAMP * 2, MALLOC_CAP_SPIRAM);
   if (vRecBuf) {
-    xTaskCreatePinnedToCore(voiceTask, "voice", 12288, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(voiceTask, "voice", 16384, NULL, 1, NULL, 0);
     Serial.println("[+] 語音 task 啟動(核心 0)");
   } else {
     Serial.println("[!] PSRAM 配置失敗,Mode 10 停用");
@@ -667,6 +667,20 @@ void setup() {
   tft.printf("PIPE = 0x%04X%04X", (uint16_t)(PIPE_OUT >> 16), (uint16_t)PIPE_OUT);
   tft.setCursor(5, 130);
   tft.printf("CHAN = %d", NRF_CHANNEL);
+
+  // 上次重啟原因:除錯語音辨識中途重啟用(電池模式看不到 Serial)
+  {
+    esp_reset_reason_t rr = esp_reset_reason();
+    const char* rs = (rr == ESP_RST_POWERON) ? "正常上電" :
+                     (rr == ESP_RST_BROWNOUT) ? "BROWNOUT 電壓不足!" :
+                     (rr == ESP_RST_PANIC)    ? "PANIC 程式崩潰!" :
+                     (rr == ESP_RST_TASK_WDT) ? "看門狗 WDT!" :
+                     (rr == ESP_RST_INT_WDT)  ? "中斷 WDT!" :
+                     (rr == ESP_RST_SW)       ? "軟體重啟" : "其他";
+    tft.setCursor(5, 200);
+    tft.setTextColor(rr == ESP_RST_POWERON ? TFT_DARKGREY : TFT_ORANGE, TFT_BLACK);
+    tft.printf("上次重啟:%s", rs);
+  }
 
   tft.setCursor(5, 170);
   if (sdOK) {
@@ -1593,7 +1607,7 @@ String vTranscribe() {
   unsigned long t0 = millis();
   while (!client.available() && millis() - t0 < 12000) vTaskDelay(10 / portTICK_PERIOD_MS);
   String full = "";
-  while (client.available()) full += client.readString();
+  while (client.available()) { full += client.readString(); vTaskDelay(1); }
   client.stop();
   if (full.length() == 0) { vSetStatus("STT 無回應"); return ""; }
   if (full.indexOf("200") < 0 && full.indexOf("\r\n") > 0) {
@@ -1645,7 +1659,7 @@ String vParseLlama(const String& userText) {
   unsigned long t0 = millis();
   while (!client.available() && millis() - t0 < 10000) vTaskDelay(10 / portTICK_PERIOD_MS);
   String full = "";
-  while (client.available()) full += client.readString();
+  while (client.available()) { full += client.readString(); vTaskDelay(1); }
   client.stop();
   if (full.length() == 0) { vSetStatus("LLM 無回應"); return ""; }
   int ck = full.indexOf("\"content\":\"");
