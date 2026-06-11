@@ -113,7 +113,7 @@ void tftHint(const char* text) {
 #define GROQ_STT_PATH   "/openai/v1/audio/transcriptions"
 #define GROQ_CHAT_PATH  "/openai/v1/chat/completions"
 #define GROQ_STT_MODEL  "whisper-large-v3-turbo"        // 語音→文字
-#define GROQ_LLM_MODEL  "llama-3.1-8b-instant"          // 文字→JSON 指令(最快免費)
+#define GROQ_LLM_MODEL  "llama-3.3-70b-versatile"       // 文字→JSON 指令(中文夠強,~1-2秒)
 #define GROQ_LANGUAGE   "zh"
 
 // 系統 prompt(單行)
@@ -359,9 +359,20 @@ String parseCommandWithLlama(const String& userText) {
   }
 
   String userEsc = jsonEscape(userText);
+  // few-shot 例子幫助模型穩定輸出格式(中文 → action)
   String body = String("{\"model\":\"") + GROQ_LLM_MODEL + "\","
               + "\"messages\":["
               + "{\"role\":\"system\",\"content\":\"" + LLM_SYSTEM_PROMPT + "\"},"
+              + "{\"role\":\"user\",\"content\":\"起飛\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"takeoff\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"降落\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"land\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"停下來\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"stop\\\"}\"},"
+              + "{\"role\":\"user\",\"content\":\"向前飛三秒\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3}\"},"
+              + "{\"role\":\"user\",\"content\":\"切到 GPS 模式\"},"
+              + "{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"mode\\\",\\\"mode\\\":2}\"},"
               + "{\"role\":\"user\",\"content\":\"" + userEsc + "\"}"
               + "],"
               + "\"response_format\":{\"type\":\"json_object\"},"
