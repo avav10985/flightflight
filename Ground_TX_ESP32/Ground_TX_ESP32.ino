@@ -116,7 +116,7 @@ LGFX tft;
 #define ENABLE_PC_MODE11        0   // Mode 11:PC 透過 USB Serial 控制飛機(透明橋接)
 #define ENABLE_VOICE_MODE10     1   // Mode 10:語音控制(需 secrets.h + WiFi 熱點,2026-06-12 開)
 #define ENABLE_MUSIC            1   // 任意 mode 都可放音樂(需 SD + MAX98357A,2026-06-12 開)
-#define ENABLE_VIDEO_MODE20     1   // Mode 20:媒體模式,SD /video/*.mjp 影片播放
+#define ENABLE_VIDEO_MODE12     1   // Mode 12:媒體模式,SD /video/*.mjp 影片播放
                                     // (需 ENABLE_MUSIC=1 共用 I²S + JPEGDEC 函式庫)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
 #define ENABLE_SD               1   // SD 卡模組:1 = 啟用(2026-06-11 新電源架構後重測。
@@ -129,10 +129,10 @@ LGFX tft;
 #define PIN_AMP_SD     18           // MAX98357A SD(shutdown):LOW=休眠靜音、HIGH=啟用
                                     // 預設拉低消除「沙沙」雜訊,Mode 10 / 音樂 要播放時設 HIGH
 
-#if ENABLE_VIDEO_MODE20
+#if ENABLE_VIDEO_MODE12
 #include <JPEGDEC.h>                // Library Manager 搜 JPEGDEC(Larry Bank)
 #if !ENABLE_MUSIC
-#error "ENABLE_VIDEO_MODE20 需要 ENABLE_MUSIC=1(共用 I2S TX 通道)"
+#error "ENABLE_VIDEO_MODE12 需要 ENABLE_MUSIC=1(共用 I2S TX 通道)"
 #endif
 void enterVideoMode();
 void exitVideoMode();
@@ -716,11 +716,11 @@ void loop() {
   }
 #endif
 
-#if ENABLE_VIDEO_MODE20
-  // Mode 20 媒體模式:接管整個 loop。NRF24 照送(mode=20 → 飛機白名單
+#if ENABLE_VIDEO_MODE12
+  // Mode 12 媒體模式:接管整個 loop。NRF24 照送(mode=12 → 飛機白名單
   // 擋掉自動 disarm),模式開關一撥走立刻退出
   static bool inVideoMode = false;
-  if (mode == 20) {
+  if (mode == 12) {
     if (!inVideoMode) { inVideoMode = true; enterVideoMode(); }
     videoModeLoop(btnEdge ? btn : BTN_NONE);
     readInputs(mode);                       // data.mode = 20
@@ -1059,7 +1059,7 @@ int musicListFiles(String list[], int maxN) {
 
 
 // ============================================================
-// Mode 20:媒體模式(SD 影片播放,Video_Test 2026-06-12 移植)
+// Mode 12:媒體模式(SD 影片播放,Video_Test 2026-06-12 移植)
 //
 // 檔案:/video/*.mjp(MJPEG)+ 同名 .wav 聲音(可無 → 無聲播放)
 // 轉檔:ffmpeg -i in.mp4 -vf "scale=240:320:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=15" -q:v 8 -f mjpeg xxx.mjp
@@ -1067,7 +1067,7 @@ int musicListFiles(String list[], int maxN) {
 // 操作:右搖桿選檔 → OK 播放 → 返回/OK 停止 → 模式開關撥走立刻退出
 // 同步:聲音當時鐘,解碼落後 >2 幀跳幀
 // ============================================================
-#if ENABLE_VIDEO_MODE20
+#if ENABLE_VIDEO_MODE12
 #define VID_FPS        15.0f
 #define VID_FRAME_MAX  (160 * 1024)
 #define VID_MAX_FILES  8
@@ -1132,7 +1132,7 @@ void drawVideoMenu() {
   tft.setFont(&fonts::efontTW_24);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setCursor(30, 4);
-  tft.print("Mode 20 媒體");
+  tft.print("Mode 12 媒體");
   if (vidCount == 0) {
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     tft.setCursor(10, 100);
@@ -1288,6 +1288,8 @@ void enterVideoMode() {
 #endif
   if (!vidFrameBuf)
     vidFrameBuf = (uint8_t*)heap_caps_malloc(VID_FRAME_MAX, MALLOC_CAP_SPIRAM);
+  tft.setSwapBytes(true);    // JPEGDEC 輸出 RGB565 little-endian,
+                             // 沒這行畫面變紅綠雜訊(2026-06-12 實測)
   vidCursor = 0;
   vidScanFiles();
   drawVideoMenu();
@@ -1295,6 +1297,7 @@ void enterVideoMode() {
 
 void exitVideoMode() {
   vidStop();
+  tft.setSwapBytes(false);   // 還原,避免影響其他畫面
 }
 
 // 音量調整(播放中 ↑↓ 鍵)
@@ -1357,7 +1360,7 @@ void videoModeLoop(int btnEdge) {
     }
   }
 }
-#endif  // ENABLE_VIDEO_MODE20
+#endif  // ENABLE_VIDEO_MODE12
 
 
 // ============================================================
