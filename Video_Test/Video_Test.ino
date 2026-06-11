@@ -8,9 +8,10 @@
 //   /video.mjp  — MJPEG 影片(連續 JPEG 幀)
 //   /video.wav  — 聲音(32kHz / 單聲道 / 16-bit PCM)
 //
-// === 電腦轉檔指令(ffmpeg,橫向 320×240 @ 20fps)===
-//   ffmpeg -i 影片.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=20" -q:v 7 -f mjpeg video.mjp
+// === 電腦轉檔指令(ffmpeg,直式螢幕,寬 240 高度自動 @15fps)===
+//   ffmpeg -i 影片.mp4 -vf "scale=240:-2,fps=15" -q:v 8 -f mjpeg video.mjp
 //   ffmpeg -i 影片.mp4 -ar 32000 -ac 1 -sample_fmt s16 video.wav
+//   (不編碼上下黑邊,程式自動置中 → 解碼像素少 43%,順很多)
 //
 // === 接線(全部沿用手把現有配置,不用改線)===
 //   SD:SPI3(SCK15 / MOSI17 / MISO47 / CS0)
@@ -41,7 +42,7 @@
 #define PIN_AMP_SD   18
 #define AUDIO_RATE   32000
 
-#define VIDEO_FPS    20.0f
+#define VIDEO_FPS    15.0f   // 配合轉檔 fps=15;解碼+SPI 推屏的舒適範圍
 #define FRAME_BUF_SZ (160 * 1024)   // 單幀 JPEG 上限(PSRAM)
 
 // ====== TFT(沿用 Ground_TX 配置)======
@@ -190,7 +191,7 @@ void setup() {
   digitalWrite(PIN_AMP_SD, LOW);
 
   tft.init();
-  tft.setRotation(3);          // 橫向 320×240(畫面顛倒就改 1)
+  tft.setRotation(2);          // 直立 240×320,跟手把其他程式同方向
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);      // JPEGDEC 輸出 RGB565 little-endian
 
@@ -248,7 +249,12 @@ void loop() {
   if (target - frameShown > 2) return;
 
   if (jpeg.openRAM(frameBuf, len, jpegDraw)) {
-    jpeg.decode(0, 0, 0);
+    // 影片只編碼內容(寬 240、高自動),畫面上下置中
+    int xoff = (240 - jpeg.getWidth())  / 2;
+    int yoff = (320 - jpeg.getHeight()) / 2;
+    if (xoff < 0) xoff = 0;
+    if (yoff < 0) yoff = 0;
+    jpeg.decode(xoff, yoff, 0);
     jpeg.close();
   }
 }
