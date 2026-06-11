@@ -159,6 +159,7 @@ volatile uint8_t g_vAction = 0;      // task 寫:0無 1takeoff 2land 3stop 4move
 volatile int8_t  g_vDirX = 0, g_vDirY = 0, g_vDirZ = 0;   // move 方向(roll/pitch/throttle)
 volatile uint8_t g_vDur  = 0;        // move 秒數
 volatile uint8_t g_vMotor = 1;       // spin 動作:轉哪顆馬達(1~4)
+volatile uint8_t g_vSpeak = 0;       // 語音回應:0無 1起飛 2降落 3停 4~7馬達1-4 8聽不懂
 volatile bool    g_vFresh = false;   // task 寫 true → 主迴圈消化後寫 false
 char             g_vStatus[48] = "開機中";   // task 寫狀態字串(主迴圈顯示)
 
@@ -711,6 +712,18 @@ void loop() {
       teleOK = true;
     }
     voiceModeUi();
+#if ENABLE_MUSIC
+    // 語音回應:task 設 g_vSpeak,主迴圈用音樂管線非阻塞播 SD 上的預錄句
+    if (g_vSpeak) {
+      static const char* SPK[] = { "", "/voice/takeoff.wav", "/voice/land.wav",
+        "/voice/stop.wav", "/voice/motor1.wav", "/voice/motor2.wav",
+        "/voice/motor3.wav", "/voice/motor4.wav", "/voice/unknown.wav" };
+      uint8_t id = g_vSpeak;
+      g_vSpeak = 0;
+      if (id <= 8 && sdOK) musicPlay(SPK[id]);
+    }
+    musicUpdate();
+#endif
     return;
   } else if (inVoiceMode) {
     inVoiceMode = false;
@@ -1658,9 +1671,9 @@ void vEmitAction(const String& json, const String& transcript) {
   };
   String act = field("action");
   char buf[48];
-  if (act == "takeoff")      { g_vAction = 1; snprintf(buf, sizeof(buf), "「%s」→起飛", transcript.c_str()); }
-  else if (act == "land")    { g_vAction = 2; snprintf(buf, sizeof(buf), "「%s」→降落", transcript.c_str()); }
-  else if (act == "stop")    { g_vAction = 3; snprintf(buf, sizeof(buf), "「%s」→懸停", transcript.c_str()); }
+  if (act == "takeoff")      { g_vAction = 1; g_vSpeak = 1; snprintf(buf, sizeof(buf), "「%s」→起飛", transcript.c_str()); }
+  else if (act == "land")    { g_vAction = 2; g_vSpeak = 2; snprintf(buf, sizeof(buf), "「%s」→降落", transcript.c_str()); }
+  else if (act == "stop")    { g_vAction = 3; g_vSpeak = 3; snprintf(buf, sizeof(buf), "「%s」→懸停", transcript.c_str()); }
   else if (act == "move") {
     g_vAction = 4;
     String dir = field("direction");
@@ -1681,9 +1694,10 @@ void vEmitAction(const String& json, const String& transcript) {
     int m = (mi > 0) ? json.substring(mi + 8).toInt() : 1;
     if (m < 1 || m > 4) m = 1;
     g_vMotor = (uint8_t)m;
+    g_vSpeak = (uint8_t)(3 + m);   // 4~7 = motor1~4
     snprintf(buf, sizeof(buf), "「%s」→轉%d號馬達", transcript.c_str(), m);
   }
-  else { g_vAction = 0; snprintf(buf, sizeof(buf), "「%s」→聽不懂", transcript.c_str()); vSetStatus(buf); return; }
+  else { g_vAction = 0; g_vSpeak = 8; snprintf(buf, sizeof(buf), "「%s」→聽不懂", transcript.c_str()); vSetStatus(buf); return; }
   vSetStatus(buf);
   g_vFresh = true;
 }
