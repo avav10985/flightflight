@@ -20,6 +20,7 @@
 #include <driver/i2s_std.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <LovyanGFX.hpp>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include "secrets.h"
@@ -28,6 +29,68 @@
 #define PIN_I2S_WS       12
 #define PIN_I2S_DIN      14
 #define PIN_SHOULDER_L    8
+
+// ====== TFT(沿用 Ground_TX_ESP32 配置)======
+class LGFX : public lgfx::LGFX_Device {
+  lgfx::Bus_SPI       _bus_instance;
+  lgfx::Panel_ILI9341 _panel_instance;
+public:
+  LGFX() {
+    {
+      auto cfg = _bus_instance.config();
+      cfg.spi_host    = SPI2_HOST;
+      cfg.spi_mode    = 0;
+      cfg.freq_write  = 40000000;
+      cfg.freq_read   = 16000000;
+      cfg.pin_sclk    = 38;
+      cfg.pin_mosi    = 39;
+      cfg.pin_miso    = 40;
+      cfg.pin_dc      = 21;
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+    {
+      auto cfg = _panel_instance.config();
+      cfg.pin_cs        = 48;
+      cfg.pin_rst       = 16;
+      cfg.pin_busy      = -1;
+      cfg.memory_width  = 240;
+      cfg.memory_height = 320;
+      cfg.panel_width   = 240;
+      cfg.panel_height  = 320;
+      cfg.readable      = false;
+      cfg.invert        = false;
+      cfg.rgb_order     = false;
+      cfg.dlen_16bit    = false;
+      cfg.bus_shared    = true;
+      _panel_instance.config(cfg);
+    }
+    setPanel(&_panel_instance);
+  }
+};
+LGFX tft;
+
+// TFT 顯示 helper
+void tftStatus(const char* line, uint16_t color = TFT_YELLOW) {
+  tft.fillRect(0, 60, 240, 80, TFT_BLACK);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(color, TFT_BLACK);
+  tft.setCursor(10, 80);
+  tft.print(line);
+}
+
+void tftTranscript(const char* text) {
+  tft.fillRect(0, 160, 240, 120, TFT_BLACK);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setCursor(10, 170);
+  tft.print("辨識:");
+  // 文字可能很長,自動換行
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(10, 200);
+  // 用 print 自動換行(LovyanGFX 預設行為)
+  tft.println(text);
+}
 
 #define SAMPLE_RATE     16000
 #define MAX_REC_SECS       10
@@ -93,6 +156,7 @@ void startRec() {
   recording  = true;
   recStartMs = millis();
   Serial.println("[REC] 開始");
+  tftStatus("● 錄音中...", TFT_RED);
 }
 
 void stopRec();
@@ -237,16 +301,21 @@ void stopRec() {
                 recCount, dur, (long)maxAmp);
   if (maxAmp < 100) {
     Serial.println("      ⚠ 訊號太弱,不上傳");
+    tftStatus("訊號太弱", TFT_ORANGE);
     return;
   }
   // 上傳
+  tftStatus("上傳中...", TFT_YELLOW);
   unsigned long t0 = millis();
   String text = transcribeWithGroq();
   unsigned long t1 = millis() - t0;
   if (text.length() > 0) {
     Serial.printf("[STT] (%lu ms)「%s」\n", t1, text.c_str());
+    tftStatus("完成", TFT_GREEN);
+    tftTranscript(text.c_str());
   } else {
     Serial.printf("[STT] 失敗 (%lu ms)\n", t1);
+    tftStatus("辨識失敗", TFT_RED);
   }
 }
 
@@ -263,6 +332,17 @@ void setup() {
   Serial.println("\n=== Mode10_Test Phase 2:錄音 + Groq Whisper ===");
   Serial.println("⚠ brown-out 偵測已關(暫時),硬體穩定後要拿掉");
 
+  // TFT 啟動
+  tft.init();
+  tft.setRotation(0);   // 直立 240×320
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 240, 50, TFT_NAVY);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setCursor(20, 12);
+  tft.print("Mode 10 語音");
+  tftStatus("開機中...", TFT_YELLOW);
+
   pinMode(PIN_SHOULDER_L, INPUT_PULLUP);
 
   recBuf = (int16_t*)heap_caps_malloc(MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM);
@@ -276,9 +356,8 @@ void setup() {
   Serial.println("[+] I2S 啟動");
 
   Serial.printf("[*] WiFi 連線 %s ...\n", WIFI_SSID);
+  tftStatus("WiFi 連線中...", TFT_YELLOW);
   WiFi.mode(WIFI_STA);
-  // 手把 3V3 LDO 規格不夠,降到 2dBm(最低)避免 brown-out。
-  // 桌面距離手機熱點 1~3m 完全夠用,RSSI 大概還 -65dBm。
   WiFi.setTxPower(WIFI_POWER_2dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long wt0 = millis();
@@ -289,8 +368,10 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[+] WiFi OK,IP=%s,RSSI=%d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    tftStatus("就緒,按肩鈕說話", TFT_GREEN);
   } else {
-    Serial.println("[X] WiFi 連線失敗,錄音還能用但不會上傳");
+    Serial.println("[X] WiFi 連線失敗");
+    tftStatus("WiFi 失敗", TFT_RED);
   }
 
   Serial.println("[+] 按住左肩鈕(GPIO 8)講話、放開上傳");
