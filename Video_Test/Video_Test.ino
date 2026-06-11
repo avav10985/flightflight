@@ -9,9 +9,9 @@
 //   /video.wav  — 聲音(32kHz / 單聲道 / 16-bit PCM)
 //
 // === 電腦轉檔指令(ffmpeg,直式螢幕,寬 240 高度自動 @15fps)===
-//   ffmpeg -i 影片.mp4 -vf "scale=240:-2,fps=15" -q:v 8 -f mjpeg video.mjp
+//   ffmpeg -i 影片.mp4 -vf "scale=240:320:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=15" -q:v 8 -f mjpeg video.mjp
 //   ffmpeg -i 影片.mp4 -ar 32000 -ac 1 -sample_fmt s16 video.wav
-//   (不編碼上下黑邊,程式自動置中 → 解碼像素少 43%,順很多)
+//   (橫式直式來源都會塞進 240×320 內,程式自動置中,黑邊不編碼)
 //
 // === 接線(全部沿用手把現有配置,不用改線)===
 //   SD:SPI3(SCK15 / MOSI17 / MISO47 / CS0)
@@ -195,10 +195,13 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);      // JPEGDEC 輸出 RGB565 little-endian
 
-  // SD
+  // SD:獨立 bus + 10cm 短線,拉高時脈餵影片(預設 4MHz 只有 ~400KB/s 不夠)
   spiSD.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
   pinMode(PIN_SD_CS, OUTPUT);
-  if (!SD.begin(PIN_SD_CS, spiSD)) { showMsg("SD 掛載失敗", TFT_RED); while (1) delay(1000); }
+  bool sdMounted = SD.begin(PIN_SD_CS, spiSD, 20000000) ||
+                   SD.begin(PIN_SD_CS, spiSD, 10000000) ||
+                   SD.begin(PIN_SD_CS, spiSD, 4000000);
+  if (!sdMounted) { showMsg("SD 掛載失敗", TFT_RED); while (1) delay(1000); }
 
   // 幀緩衝(PSRAM)
   frameBuf = (uint8_t*)heap_caps_malloc(FRAME_BUF_SZ, MALLOC_CAP_SPIRAM);
