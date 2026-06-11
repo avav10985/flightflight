@@ -114,7 +114,7 @@ LGFX tft;
 // ====== V2-B 跟其他 feature 旗標(2026-06-06)======
 // 硬體 / API key 齊全才改 1,**程式編譯時不會占用太多 flash**
 #define ENABLE_PC_MODE11        0   // Mode 11:PC 透過 USB Serial 控制飛機(透明橋接)
-#define ENABLE_VOICE_MODE10     0   // Mode 10:語音控制(需 INMP441 + MAX98357A + WiFi + API keys)
+#define ENABLE_VOICE_MODE10     1   // Mode 10:語音控制(需 secrets.h + WiFi 熱點,2026-06-12 開)
 #define ENABLE_MUSIC            1   // 任意 mode 都可放音樂(需 SD + MAX98357A,2026-06-12 開)
 #define ENABLE_VIDEO_MODE20     1   // Mode 20:媒體模式,SD /video/*.mjp 影片播放
                                     // (需 ENABLE_MUSIC=1 共用 I²S + JPEGDEC 函式庫)
@@ -137,6 +137,35 @@ LGFX tft;
 void enterVideoMode();
 void exitVideoMode();
 void videoModeLoop(int btnEdge);
+#endif
+
+#if ENABLE_VOICE_MODE10
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include "secrets.h"                // WIFI_SSID / WIFI_PASS / GROQ_API_KEY(gitignore 擋住)
+#if !ENABLE_MUSIC
+#error "ENABLE_VOICE_MODE10 需要 ENABLE_MUSIC=1(I2S 全雙工共用時脈)"
+#endif
+void enterVoiceMode();
+void exitVoiceMode();
+void voiceModeUi();
+void applyVoiceOverride();
+void voiceTask(void* arg);
+
+// ---- 主迴圈(核心1)↔ 語音 task(核心0)共享變數,單寫者原則 ----
+volatile bool    g_vMode10 = false;  // 主迴圈寫:目前在 mode 10
+volatile bool    g_vPTT    = false;  // 主迴圈寫:左肩鈕按住中
+volatile uint8_t g_vAction = 0;      // task 寫:0無 1takeoff 2land 3stop 4move
+volatile int8_t  g_vDirX = 0, g_vDirY = 0, g_vDirZ = 0;   // move 方向(roll/pitch/throttle)
+volatile uint8_t g_vDur  = 0;        // move 秒數
+volatile bool    g_vFresh = false;   // task 寫 true → 主迴圈消化後寫 false
+char             g_vStatus[48] = "開機中";   // task 寫狀態字串(主迴圈顯示)
+
+#define VREC_RATE     32000          // 錄音取樣率(跟 I²S 音樂共用時脈)
+#define VREC_MAXSEC   8
+#define VREC_MAXSAMP  (VREC_RATE * VREC_MAXSEC)
+int16_t* vRecBuf   = nullptr;        // PSRAM 錄音緩衝(setup 配置)
+uint32_t vRecCount = 0;
 #endif
 
 // ---- 方向反轉（測試後不對就改）----
@@ -283,9 +312,14 @@ void readInputs(byte mode) {
   data.roll     = centerMap(analogRead(J_ROLL),     REV_ROLL);
 
   // yaw 由肩鍵：L→42、R→212、都沒按/同時按→127（對應 ±60°/s）
-  bool yawL = (digitalRead(SHOULDER_L) == LOW);
-  bool yawR = (digitalRead(SHOULDER_R) == LOW);
-  data.yaw = (yawL && !yawR) ? 42 : (yawR && !yawL) ? 212 : 127;
+  // mode 10 例外:左肩鈕是語音 PTT,yaw 固定中立(語音 yaw 之後再說)
+  if (mode == 10) {
+    data.yaw = 127;
+  } else {
+    bool yawL = (digitalRead(SHOULDER_L) == LOW);
+    bool yawR = (digitalRead(SHOULDER_R) == LOW);
+    data.yaw = (yawL && !yawR) ? 42 : (yawR && !yawL) ? 212 : 127;
+  }
 
   data.mode = mode;
 
@@ -589,6 +623,17 @@ void setup() {
   Serial.println("[+] 音樂 I²S 就緒(選單→音樂 播放/停止)");
 #endif
 
+#if ENABLE_VOICE_MODE10
+  // 錄音緩衝(PSRAM)+ 語音管線 task 釘在核心 0(主迴圈在核心 1)
+  vRecBuf = (int16_t*)heap_caps_malloc(VREC_MAXSAMP * 2, MALLOC_CAP_SPIRAM);
+  if (vRecBuf) {
+    xTaskCreatePinnedToCore(voiceTask, "voice", 12288, NULL, 1, NULL, 0);
+    Serial.println("[+] 語音 task 啟動(核心 0)");
+  } else {
+    Serial.println("[!] PSRAM 配置失敗,Mode 10 停用");
+  }
+#endif
+
   // TFT(SD 之後 init,共用 SPI bus_shared 模式)
   tft.init();
   tft.setRotation(2);   // 240×320 portrait 翻 180°
@@ -646,6 +691,30 @@ void loop() {
   static int lastBtn = BTN_NONE;
   bool btnEdge = (btn != lastBtn && btn != BTN_NONE);
   lastBtn = btn;
+
+#if ENABLE_VOICE_MODE10
+  // Mode 10 語音控制:50Hz 控制照跑(這是飛行模式!),語音管線在
+  // 核心 0 背景跑,主迴圈只做 PTT 偵測 + 虛擬搖桿覆寫 + UI
+  static bool inVoiceMode = false;
+  if (mode == 10) {
+    if (!inVoiceMode) { inVoiceMode = true; enterVoiceMode(); }
+    g_vPTT = (digitalRead(SHOULDER_L) == LOW);   // 左肩鈕 = PTT
+    readInputs(mode);                            // data.mode = 10,yaw 中立
+    applyVoiceOverride();                        // 語音程式覆寫虛擬搖桿
+    bool vok = radio.write(&data, sizeof(Signal));
+    if (vok && radio.isAckPayloadAvailable()) {
+      radio.read(&tele, sizeof(tele));
+      teleOK = true;
+    }
+    voiceModeUi();
+    return;
+  } else if (inVoiceMode) {
+    inVoiceMode = false;
+    exitVoiceMode();
+    ui = UI_FLIGHT;
+    drawFlightStatic();
+  }
+#endif
 
 #if ENABLE_VIDEO_MODE20
   // Mode 20 媒體模式:接管整個 loop。NRF24 照送(mode=20 → 飛機白名單
@@ -867,6 +936,9 @@ uint8_t  musicVolume  = 60;     // 0~100
 
 #define MUSIC_SAMPLE_RATE 32000  // WAV 需轉成 32kHz / 單聲道 / 16-bit PCM
 i2s_chan_handle_t musicTx = nullptr;
+#if ENABLE_VOICE_MODE10
+i2s_chan_handle_t micRx   = nullptr;   // INMP441,跟喇叭全雙工共 BCLK/WS
+#endif
 
 // I²S TX 初始化(沿用 Play_Test 驗證過的設定)
 void initMusicI2S() {
@@ -875,7 +947,11 @@ void initMusicI2S() {
   // 6 × 1023 frames × 4B ≈ 24KB 內部 RAM,換 6138 samples 餘裕
   chan_cfg.dma_desc_num  = 6;
   chan_cfg.dma_frame_num = 1023;
+#if ENABLE_VOICE_MODE10
+  i2s_new_channel(&chan_cfg, &musicTx, &micRx);   // 同 port 全雙工(共 BCLK/WS)
+#else
   i2s_new_channel(&chan_cfg, &musicTx, NULL);
+#endif
 
   i2s_std_config_t std_cfg = {};
   std_cfg.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(MUSIC_SAMPLE_RATE);
@@ -888,6 +964,15 @@ void initMusicI2S() {
   std_cfg.gpio_cfg.din  = I2S_GPIO_UNUSED;
   i2s_channel_init_std_mode(musicTx, &std_cfg);
   i2s_channel_enable(musicTx);
+
+#if ENABLE_VOICE_MODE10
+  // 麥克風 RX:同時脈(32kHz / 32-bit),DIN = INMP441 SD
+  i2s_std_config_t rx_cfg = std_cfg;
+  rx_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+  rx_cfg.gpio_cfg.din  = (gpio_num_t)PIN_I2S_DIN;
+  i2s_channel_init_std_mode(micRx, &rx_cfg);
+  // 不在這裡 enable:錄音開始才 enable、結束 disable(避免 DMA 堆舊資料)
+#endif
 
   // 預灌 silence 讓 MAX98357A 醒來看到穩定 0 訊號(boot pop 消除)
   int32_t silence[256] = {0};
@@ -1273,6 +1358,416 @@ void videoModeLoop(int btnEdge) {
   }
 }
 #endif  // ENABLE_VIDEO_MODE20
+
+
+// ============================================================
+// Mode 10:語音控制(2026-06-12 整合,Mode10_Test 管線移植)
+//
+// 架構:語音管線(錄音→WiFi→Groq Whisper→Llama→action)跑在
+//   核心 0 的獨立 task;主迴圈(核心 1)50Hz 控制完全不中斷。
+//   WiFi(≤2.472GHz)與 NRF CH88(2.488GHz)頻率錯開可共存。
+//
+// 虛擬搖桿:action 在主迴圈轉成 data.throttle/pitch/roll 覆寫。
+// 安全:搖桿一動立刻搶回;move 限時;模式開關最高優先。
+// ============================================================
+#if ENABLE_VOICE_MODE10
+// --- 可調參數(拆槳地面測試後修正)---
+#define VOICE_THR_HOVER  135   // 懸停虛擬油門(0~255);實測懸停點後改
+#define VOICE_TILT        50   // move 搖桿偏移(50 ≈ 7.9°,MAX_ANGLE 20° 時)
+#define VOICE_THR_VERT    10   // 上升/下降的油門增減
+#define VOICE_PITCH_FWD   -1   // 「前進」的 pitch 偏移正負(拆槳測試確認)
+#define VOICE_ROLL_RIGHT  +1   // 「右」的 roll 偏移正負(拆槳測試確認)
+
+// (VREC_* 與 vRecBuf 宣告在檔案頂部共享區)
+
+// ---- 虛擬搖桿程式(主迴圈端)----
+enum VProg { VP_NONE, VP_TAKEOFF, VP_HOVER, VP_MOVE, VP_LAND };
+VProg    vProg = VP_NONE;
+unsigned long vProgT0 = 0;
+uint8_t  vMoveDur = 0;
+int8_t   vMx = 0, vMy = 0, vMz = 0;
+uint8_t  vBaseThr = 0, vBasePitch = 127, vBaseRoll = 127;
+
+const char* vProgName() {
+  switch (vProg) {
+    case VP_TAKEOFF: return "起飛中";
+    case VP_HOVER:   return "懸停保持";
+    case VP_MOVE:    return "移動中";
+    case VP_LAND:    return "降落中";
+    default:         return "搖桿控制";
+  }
+}
+
+void applyVoiceOverride() {
+  // 收到新動作 → 啟動程式,記錄搖桿基準
+  if (g_vFresh) {
+    g_vFresh = false;
+    switch (g_vAction) {
+      case 1: vProg = VP_TAKEOFF; break;
+      case 2: vProg = VP_LAND;    break;
+      case 3: vProg = VP_HOVER;   break;
+      case 4: vProg = VP_MOVE;
+              vMx = g_vDirX; vMy = g_vDirY; vMz = g_vDirZ;
+              vMoveDur = g_vDur ? g_vDur : 2;
+              if (vMoveDur > 10) vMoveDur = 10;
+              break;
+      default: return;   // unknown → 不動作
+    }
+    vProgT0 = millis();
+    vBaseThr = data.throttle; vBasePitch = data.pitch; vBaseRoll = data.roll;
+  }
+  if (vProg == VP_NONE) return;
+
+  // 安全 1:搖桿任何軸偏離「程式啟動時的位置」> 25 → 立刻搶回手動
+  if (abs((int)data.throttle - vBaseThr)  > 25 ||
+      abs((int)data.pitch    - vBasePitch) > 25 ||
+      abs((int)data.roll     - vBaseRoll)  > 25) {
+    vProg = VP_NONE;
+    return;
+  }
+
+  float t = (millis() - vProgT0) / 1000.0f;
+  int thr = VOICE_THR_HOVER, pit = 127, rol = 127;
+
+  switch (vProg) {
+    case VP_TAKEOFF:               // 1.5 秒線性升到懸停油門
+      thr = (int)(VOICE_THR_HOVER * (t / 1.5f));
+      if (t >= 1.5f) { vProg = VP_HOVER; vProgT0 = millis(); thr = VOICE_THR_HOVER; }
+      break;
+    case VP_HOVER:                 // 維持到搖桿介入 / 新指令 / 切模式
+      break;
+    case VP_MOVE:
+      thr = VOICE_THR_HOVER + vMz * VOICE_THR_VERT;
+      pit = 127 + vMy * VOICE_TILT;
+      rol = 127 + vMx * VOICE_TILT;
+      if (t >= vMoveDur) { vProg = VP_HOVER; vProgT0 = millis(); }
+      break;
+    case VP_LAND: {                // 3 秒線性收油門到 0
+      float k = 1.0f - t / 3.0f;
+      if (k <= 0) { thr = 0; vProg = VP_NONE; }
+      else        thr = (int)(VOICE_THR_HOVER * k);
+      break;
+    }
+    default: break;
+  }
+  data.throttle = (uint8_t)constrain(thr, 0, 255);
+  data.pitch    = (uint8_t)constrain(pit, 0, 255);
+  data.roll     = (uint8_t)constrain(rol, 0, 255);
+  data.yaw      = 127;
+}
+
+// ---- 語音 task 端:HTTP 工具(Mode10_Test 移植)----
+String vJsonEscape(const String& s) {
+  String out; out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else out += c;
+  }
+  return out;
+}
+
+String vJsonUnescape(const String& s) {
+  String out; out.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    if (s[i] == '\\' && i + 1 < s.length()) {
+      char n = s[i + 1];
+      switch (n) {
+        case '"': out += '"'; break;  case '\\': out += '\\'; break;
+        case '/': out += '/'; break;  case 'n': out += '\n'; break;
+        case 'r': out += '\r'; break; case 't': out += '\t'; break;
+        default:  out += n; break;
+      }
+      i++;
+    } else out += s[i];
+  }
+  return out;
+}
+
+void vSetStatus(const char* s) {
+  strncpy(g_vStatus, s, sizeof(g_vStatus) - 1);
+  g_vStatus[sizeof(g_vStatus) - 1] = 0;
+}
+
+// PCM → WAV → Groq Whisper STT(在 task 上跑,阻塞沒關係)
+String vTranscribe() {
+  uint32_t audioBytes = vRecCount * 2;
+  if (audioBytes == 0) return "";
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(12000);
+  if (!client.connect("api.groq.com", 443)) { vSetStatus("STT 連線失敗"); return ""; }
+
+  const char* boundary = "----GTXVoiceBoundary";
+  String head1 = String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3-turbo\r\n";
+  String head2 = String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nzh\r\n";
+  String head3 = String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n";
+  String head4 = String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
+  String tail  = String("\r\n--") + boundary + "--\r\n";
+  uint32_t wavLen  = 44 + audioBytes;
+  uint32_t bodyLen = head1.length() + head2.length() + head3.length() + head4.length() + wavLen + tail.length();
+
+  client.printf("POST /openai/v1/audio/transcriptions HTTP/1.1\r\n");
+  client.print("Host: api.groq.com\r\n");
+  client.printf("Authorization: Bearer %s\r\n", GROQ_API_KEY);
+  client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary);
+  client.printf("Content-Length: %u\r\n", bodyLen);
+  client.print("Connection: close\r\n\r\n");
+  client.print(head1); client.print(head2); client.print(head3); client.print(head4);
+
+  // 44-byte WAV header
+  uint8_t h[44];
+  memcpy(h, "RIFF", 4); uint32_t v = 36 + audioBytes; memcpy(h + 4, &v, 4);
+  memcpy(h + 8, "WAVEfmt ", 8); v = 16; memcpy(h + 16, &v, 4);
+  uint16_t u = 1; memcpy(h + 20, &u, 2); memcpy(h + 22, &u, 2);
+  v = VREC_RATE;     memcpy(h + 24, &v, 4);
+  v = VREC_RATE * 2; memcpy(h + 28, &v, 4);
+  u = 2; memcpy(h + 32, &u, 2); u = 16; memcpy(h + 34, &u, 2);
+  memcpy(h + 36, "data", 4); memcpy(h + 40, &audioBytes, 4);
+  client.write(h, 44);
+
+  // PCM 分塊送
+  uint8_t* p = (uint8_t*)vRecBuf;
+  uint32_t remain = audioBytes;
+  while (remain > 0) {
+    size_t n = remain > 4096 ? 4096 : remain;
+    client.write(p, n);
+    p += n; remain -= n;
+  }
+  client.print(tail);
+
+  unsigned long t0 = millis();
+  while (!client.available() && millis() - t0 < 12000) vTaskDelay(10 / portTICK_PERIOD_MS);
+  String full = "";
+  while (client.available()) full += client.readString();
+  client.stop();
+  if (full.length() == 0) { vSetStatus("STT 無回應"); return ""; }
+  if (full.indexOf("200") < 0 && full.indexOf("\r\n") > 0) {
+    vSetStatus("STT HTTP 錯誤"); return "";
+  }
+  int k = full.indexOf("\"text\":\"");
+  if (k < 0) { vSetStatus("STT 無結果"); return ""; }
+  int s = k + 8, e = s;
+  while (e < (int)full.length()) {
+    if (full[e] == '\\' && e + 1 < (int)full.length()) { e += 2; continue; }
+    if (full[e] == '"') break;
+    e++;
+  }
+  String text = vJsonUnescape(full.substring(s, e));
+  // 清標點(Mode10_Test 老坑)
+  text.trim();
+  String punct = "。,!?,.!?;:、 \"'";
+  while (text.length() > 0 && punct.indexOf(text[text.length() - 1]) >= 0)
+    text.remove(text.length() - 1);
+  return text;
+}
+
+// 文字 → Llama → action JSON
+String vParseLlama(const String& userText) {
+  if (userText.length() == 0) return "";
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(10000);
+  if (!client.connect("api.groq.com", 443)) { vSetStatus("LLM 連線失敗"); return ""; }
+
+  String body = String("{\"model\":\"llama-3.3-70b-versatile\",\"messages\":["
+    "{\"role\":\"system\",\"content\":\"你是無人機語音指令解析器。把使用者的中文輸入翻成 JSON。可用 action: takeoff(起飛)、land(降落)、move(移動,要 direction: up/down/left/right/forward/back 跟 duration_sec 1-10)、stop(停止/懸停)。聽不懂回 {\\\"action\\\":\\\"unknown\\\"}。只回 JSON。\"},"
+    "{\"role\":\"user\",\"content\":\"起飛\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"takeoff\\\"}\"},"
+    "{\"role\":\"user\",\"content\":\"降落\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"land\\\"}\"},"
+    "{\"role\":\"user\",\"content\":\"停下來\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"stop\\\"}\"},"
+    "{\"role\":\"user\",\"content\":\"向前飛三秒\"},{\"role\":\"assistant\",\"content\":\"{\\\"action\\\":\\\"move\\\",\\\"direction\\\":\\\"forward\\\",\\\"duration_sec\\\":3}\"},"
+    "{\"role\":\"user\",\"content\":\"") + vJsonEscape(userText) + "\"}],"
+    "\"response_format\":{\"type\":\"json_object\"},\"temperature\":0.1}";
+
+  client.print("POST /openai/v1/chat/completions HTTP/1.1\r\n");
+  client.print("Host: api.groq.com\r\n");
+  client.printf("Authorization: Bearer %s\r\n", GROQ_API_KEY);
+  client.print("Content-Type: application/json\r\n");
+  client.printf("Content-Length: %d\r\n", body.length());
+  client.print("Connection: close\r\n\r\n");
+  client.print(body);
+
+  unsigned long t0 = millis();
+  while (!client.available() && millis() - t0 < 10000) vTaskDelay(10 / portTICK_PERIOD_MS);
+  String full = "";
+  while (client.available()) full += client.readString();
+  client.stop();
+  if (full.length() == 0) { vSetStatus("LLM 無回應"); return ""; }
+  int ck = full.indexOf("\"content\":\"");
+  if (ck < 0) { vSetStatus("LLM 無結果"); return ""; }
+  int s = ck + 11, e = s;
+  while (e < (int)full.length()) {
+    if (full[e] == '\\' && e + 1 < (int)full.length()) { e += 2; continue; }
+    if (full[e] == '"') break;
+    e++;
+  }
+  return vJsonUnescape(full.substring(s, e));
+}
+
+// 從 action JSON 抽欄位 → 寫共享變數
+void vEmitAction(const String& json, const String& transcript) {
+  auto field = [&](const char* key) -> String {
+    String pat = String("\"") + key + "\":\"";
+    int i = json.indexOf(pat);
+    if (i < 0) return "";
+    int s = i + pat.length();
+    int e = json.indexOf("\"", s);
+    return (e > 0) ? json.substring(s, e) : "";
+  };
+  String act = field("action");
+  char buf[48];
+  if (act == "takeoff")      { g_vAction = 1; snprintf(buf, sizeof(buf), "「%s」→起飛", transcript.c_str()); }
+  else if (act == "land")    { g_vAction = 2; snprintf(buf, sizeof(buf), "「%s」→降落", transcript.c_str()); }
+  else if (act == "stop")    { g_vAction = 3; snprintf(buf, sizeof(buf), "「%s」→懸停", transcript.c_str()); }
+  else if (act == "move") {
+    g_vAction = 4;
+    String dir = field("direction");
+    g_vDirX = g_vDirY = g_vDirZ = 0;
+    if (dir == "forward") g_vDirY = VOICE_PITCH_FWD;
+    if (dir == "back")    g_vDirY = -VOICE_PITCH_FWD;
+    if (dir == "right")   g_vDirX = VOICE_ROLL_RIGHT;
+    if (dir == "left")    g_vDirX = -VOICE_ROLL_RIGHT;
+    if (dir == "up")      g_vDirZ = +1;
+    if (dir == "down")    g_vDirZ = -1;
+    int di = json.indexOf("\"duration_sec\":");
+    g_vDur = (di > 0) ? (uint8_t)json.substring(di + 15).toInt() : 2;
+    snprintf(buf, sizeof(buf), "「%s」→移動 %ds", transcript.c_str(), g_vDur);
+  }
+  else { g_vAction = 0; snprintf(buf, sizeof(buf), "「%s」→聽不懂", transcript.c_str()); vSetStatus(buf); return; }
+  vSetStatus(buf);
+  g_vFresh = true;
+}
+
+// ---- 語音 task 主體(核心 0)----
+void voiceTask(void* arg) {
+  bool wifiStarted = false;
+  for (;;) {
+    if (!g_vMode10) { vTaskDelay(100 / portTICK_PERIOD_MS); continue; }
+
+    // WiFi 連線(第一次進 mode 10 才連,之後保持)
+    if (!wifiStarted) {
+      vSetStatus("WiFi 連線中...");
+      WiFi.mode(WIFI_STA);
+      WiFi.setTxPower(WIFI_POWER_8_5dBm);
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      wifiStarted = true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      static unsigned long lastTry = 0;
+      if (millis() - lastTry > 8000) { WiFi.disconnect(); WiFi.begin(WIFI_SSID, WIFI_PASS); lastTry = millis(); }
+      vSetStatus("等待 WiFi...");
+      vTaskDelay(300 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    if (!g_vPTT) { vSetStatus("就緒:按住左肩鈕說話"); vTaskDelay(50 / portTICK_PERIOD_MS); continue; }
+
+    // --- 錄音(按住期間)---
+    vSetStatus("錄音中...");
+    vRecCount = 0;
+    i2s_channel_enable(micRx);
+    static int32_t raw[256];
+    while (g_vPTT && g_vMode10 && vRecCount < VREC_MAXSAMP) {
+      size_t br = 0;
+      if (i2s_channel_read(micRx, raw, sizeof(raw), &br, 80 / portTICK_PERIOD_MS) == ESP_OK) {
+        int n = br / 4;
+        for (int i = 0; i < n && vRecCount < VREC_MAXSAMP; i++) {
+          int32_t s = raw[i] >> 16;
+          if (s > 32767) s = 32767;
+          if (s < -32768) s = -32768;
+          vRecBuf[vRecCount++] = (int16_t)s;
+        }
+      }
+    }
+    i2s_channel_disable(micRx);
+    if (!g_vMode10) continue;
+
+    // 太短 / 太弱不上傳
+    if (vRecCount < VREC_RATE / 4) { vSetStatus("太短,再試一次"); vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
+    int32_t maxAmp = 0;
+    for (uint32_t i = 0; i < vRecCount; i += 8) {
+      int32_t a = vRecBuf[i]; if (a < 0) a = -a;
+      if (a > maxAmp) maxAmp = a;
+    }
+    if (maxAmp < 100) { vSetStatus("訊號太弱,再試一次"); vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
+
+    // --- STT + 解析 ---
+    vSetStatus("辨識中...");
+    String text = vTranscribe();
+    if (text.length() == 0) { vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
+    vSetStatus("解析中...");
+    String json = vParseLlama(text);
+    if (json.length() == 0) { vTaskDelay(800 / portTICK_PERIOD_MS); continue; }
+    vEmitAction(json, text);
+  }
+}
+
+// ---- 主迴圈端 UI ----
+void drawVoiceStatic() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 240, 32, TFT_MAROON);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_MAROON);
+  tft.setCursor(14, 4);
+  tft.print("Mode 10 語音控制");
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(5, 296);
+  tft.print("按住左肩鈕說話,搖桿一動即手動");
+}
+
+void enterVoiceMode() {
+#if ENABLE_MUSIC
+  musicStop();        // 錄音時不放音樂(回授 + I²S 雙工單純化)
+#endif
+  vProg = VP_NONE;
+  drawVoiceStatic();
+  g_vMode10 = true;
+}
+
+void exitVoiceMode() {
+  g_vMode10 = false;
+  g_vPTT    = false;
+  vProg     = VP_NONE;
+  // WiFi 保持連線(下次進來免等);要省電再說
+}
+
+void voiceModeUi() {
+  static char lastStatus[48] = "";
+  static VProg lastProg = VP_LAND;   // 故意不同,首次必畫
+  static unsigned long lastTele = 0;
+
+  if (strcmp(lastStatus, g_vStatus) != 0) {
+    strncpy(lastStatus, g_vStatus, sizeof(lastStatus));
+    tft.fillRect(0, 50, 240, 60, TFT_BLACK);
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(8, 60);
+    tft.print(lastStatus);
+  }
+  if (vProg != lastProg) {
+    lastProg = vProg;
+    tft.fillRect(0, 130, 240, 40, TFT_BLACK);
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(vProg == VP_NONE ? TFT_WHITE : TFT_GREEN, TFT_BLACK);
+    tft.setCursor(8, 138);
+    tft.printf("%s  油門 %d", vProgName(), data.throttle);
+  }
+  if (millis() - lastTele > 500) {   // 遙測 2Hz 更新
+    lastTele = millis();
+    tft.fillRect(0, 190, 240, 30, TFT_BLACK);
+    tft.setFont(&fonts::efontTW_16);
+    tft.setTextColor(teleOK ? TFT_LIGHTGREY : TFT_RED, TFT_BLACK);
+    tft.setCursor(8, 196);
+    if (teleOK)
+      tft.printf("R%+.1f P%+.1f 高 %.1fm", tele.roll / 10.0f, tele.pitch / 10.0f, tele.altitude_dm / 10.0f);
+    else
+      tft.print("飛機未連線");
+  }
+}
+#endif  // ENABLE_VOICE_MODE10
 
 
 // ============================================================

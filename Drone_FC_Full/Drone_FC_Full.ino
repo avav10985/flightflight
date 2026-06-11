@@ -895,10 +895,12 @@ void failsafe() {
   }
 }
 
-// 目前只有 mode 01(手動自穩,byte 值 1)已實作可飛;其他 mode 一律拒武裝。
-// 未來:Mode 02(GPS)、10(語音)、11(PC)實作後要加進條件式,例如:
-//   return m == 1 || m == 2 || m == 10 || m == 11;
-inline bool modeFlyable(byte m) { return m == 1; }
+// 可飛模式白名單。其他 mode 一律拒武裝。
+// 2026-06-12 加 mode 10(語音):手把端把語音 action 轉成虛擬搖桿值,
+// 對飛機來說跟 mode 01 完全相同(收 throttle/pitch/roll/yaw 跑 PID),
+// 所有安全機制(failsafe / 油門武裝 / 校準)原封不動。
+// 未來:Mode 02(GPS)、11(PC)實作後再加。
+inline bool modeFlyable(byte m) { return m == 1 || m == 10; }
 
 void disarm() {
   if (armed) {

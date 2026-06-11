@@ -1,3 +1,7 @@
+# PartitionScheme 選 app5M_fat24M_32MB 只是為了讓「大小檢查上限」變 4.8MB
+# (WiFi+TLS+JPEGDEC 全開後 binary 3.36MB,超過 16MB 方案的 3MB 上限)。
+# 實際分區表由本資料夾的 partitions.csv 蓋掉(esp32 core 優先序:sketch > menu),
+# 是合法的 16MB 配置(APP 6MB + FATFS 9.9MB)。Arduino IDE 手動燒也選同一個方案。
 profiles:
   esp32s3_n16r8:
-    fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,DebugLevel=none,PSRAM=opi,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default
+    fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app5M_fat24M_32MB,DebugLevel=none,PSRAM=opi,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default

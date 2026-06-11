@@ -1,0 +1,7 @@
+# Ground_TX_ESP32 自訂分區(16MB flash)
+# 預設 16MB 方案 APP 最大只有 3MB,WiFi+TLS+JPEGDEC+LovyanGFX 全開後
+# binary 3.36MB 裝不下 → APP 拉到 6MB(無 OTA),剩下給 FATFS
+# Name,    Type, SubType,  Offset,   Size
+nvs,       data, nvs,      0x9000,   0x5000
+app0,      app,  factory,  0x10000,  0x600000
+ffat,      data, fat,      0x610000, 0x9F0000
