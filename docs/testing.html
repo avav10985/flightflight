@@ -116,9 +116,12 @@
     <tr><td>本地離線語音辨識</td><td>導入 Espressif ESP-SR(AFE + MultiNet),以拼音定義中文命令詞於裝置端直接辨識;消除網路依賴、速率限制與雲端延遲(目標 &lt; 1 s)。需自行打包中文模型(mn6_cn)至 flash model 分區</td><td>高</td></tr>
     <tr><td>語音指令 → 控制鏈路銜接</td><td>將 Mode 10 解析所得 action 轉換為 Signal 封包序列,經 nRF24 注入飛行控制(含逾時回復搖桿控制之安全機制)</td><td>高</td></tr>
     <tr><td>GPS 導航閉環</td><td>Mode 02 導航輸出(目標 roll / pitch)接入 PID 設定點,完成定點飛行閉環;需戶外定位精度驗證</td><td>中</td></tr>
-    <tr><td>氣壓定高</td><td>BMP280 高度估計 + 油門軸 PID,實現高度保持;為自動降落之前置功能</td><td>中</td></tr>
+    <tr><td>氣壓定高與自動降落</td><td>BMP280 高度估計 + 油門軸 PID 實現高度保持;雷射近地距離輔助自動降落</td><td>中</td></tr>
+    <tr><td>雷射避障</td><td>VL53L0X × 4 <b>硬體已全數安裝</b>(TCA9548A 多工);待實作多方向距離監測與避障迴避邏輯,與 GPS 導航整合</td><td>中</td></tr>
     <tr><td>SD 卡資料記錄</td><td>新電源架構下重新驗證 SPI 共存;啟用後支援飛行紀錄與音訊播放</td><td>中</td></tr>
     <tr><td>頭部追蹤雲台</td><td>手機 IMU(DeviceOrientation API)→ WiFi → 機載雙伺服雲台;原型已驗證,待整合至主程式</td><td>低</td></tr>
+    <tr><td>Mode 11 PC 控制</td><td>USB Serial 透明橋接,由電腦端程式直接控制飛行,作為演算法實驗介面</td><td>低</td></tr>
+    <tr><td>地面站體驗強化</td><td>TFT 常駐選單(肩鍵長按呼出)、SD 音樂播放、語音 TTS 回覆(MAX98357A 硬體已就緒)</td><td>低</td></tr>
   </table></div>
 </section>
 

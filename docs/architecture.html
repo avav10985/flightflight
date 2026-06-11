@@ -49,7 +49,7 @@
       <div class="node" data-k="fc">LOLIN D32 飛控主程式 <small>ESP32・濾波・PID・混控・導航狀態機</small></div>
       <div class="node" data-k="imu">MPU-6050 IMU <small>I²C・姿態量測來源</small></div>
       <div class="node" data-k="gps">NEO-6M GPS <small>UART・定位與導航</small></div>
-      <div class="node" data-k="baro">BMP280 / VL53L0X ×2 <small>氣壓定高・雷射近距(預留)</small></div>
+      <div class="node" data-k="baro">BMP280 / VL53L0X ×4 <small>氣壓定高・雷射測距避障(硬體已就緒)</small></div>
       <div class="node" data-k="mag">QMC5883 磁力計 <small>絕對航向・抑制陀螺漂移</small></div>
       <div class="node" data-k="motor">動力輸出 ×4 <small>MOSFET PWM・X 型混控</small></div>
       <div class="node" data-k="cam">ESP32-CAM <small>獨立節點・WiFi 即時影像</small></div>
@@ -209,8 +209,8 @@ const ARCH_INFO = {
     "校準資料(陀螺零偏、水平基準)存於 NVS,斷電保留;校準程序含動作偵測拒寫機制。詳見飛控與校準章。"],
   gps: ["NEO-6M 衛星定位模組",
     "UART @ 9600 bps,NMEA 解析取得經緯度(×10⁷ 定點數)、衛星數與訊號強度。Mode 02 之距離 / 方位角計算與導航狀態機已完成,待接入 PID 設定點。", ""],
-  baro: ["BMP280 氣壓計 + VL53L0X 雷射測距 × 2",
-    "氣壓計提供相對高度估計(定高用);雷射測距經 TCA9548A I²C 多工器掛載兩顆(近地 / 避障用)。硬體與驅動均已就緒,等待高度控制環實作。", ""],
+  baro: ["BMP280 氣壓計 + VL53L0X 雷射測距 × 4",
+    "氣壓計提供相對高度估計(定高用);雷射測距經 TCA9548A I²C 多工器掛載四顆(近地高度 + 多方向避障)。硬體已全數安裝、驅動就緒,等待高度控制環與避障邏輯實作。", ""],
   mag: ["QMC5883 磁力計(GY-271)",
     "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
   motor: ["動力輸出(空心杯馬達 × 4)",
