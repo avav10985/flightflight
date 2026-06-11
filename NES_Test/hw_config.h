@@ -4,7 +4,7 @@
 // ============================================================
 // NES_Test 硬體設定 — flightflight 手把 V2-A(ESP32-S3)
 // 顯示 / 聲音 / SD 腳位都沿用手把現有接線,完全不用改線。
-// 唯一新需求:右搖桿 X 訊號接到 GPIO 10(本來就是 roll 預留線)
+// 全部用現有接線,不用改任何線
 // ============================================================
 
 #define FSROOT "/fs"
@@ -18,12 +18,13 @@
 #define HW_AUDIO_EXTDAC_DOUT 13
 
 /* 控制器:自訂實作(controller.cpp),不用範例的 HW_CONTROLLER_GPIO 巨集
- *   十字鍵 = 右搖桿(GPIO 4 上下 / GPIO 10 左右,ADC、軸向反相)
+ *   上下 = 右搖桿 Y(GPIO 4,有彈簧回中)
+ *   左右 = 左搖桿 X(GPIO 2,有彈簧回中;左搖桿 Y 是拆彈簧油門不適合)
  *   A / B  = 右肩鈕 GPIO 9 / 左肩鈕 GPIO 8
  *   Start / Select = 按鍵叢電阻階梯 GPIO 7(OK / 返回)
  */
 #define PIN_JOY_UD     4
-#define PIN_JOY_LR    10
+#define PIN_JOY_LR     2
 #define PIN_BTN_A      9
 #define PIN_BTN_B      8
 #define PIN_BTN_LADDER 7
