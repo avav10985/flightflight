@@ -57,9 +57,9 @@
         <line x1="752" y1="66" x2="782" y2="66" stroke="#94a3b5" stroke-width="1.6" marker-end="url(#ar2)"/>
         <rect x="785" y="35" width="85" height="62" rx="8" fill="#1b232e" stroke="#2c3a4d"/>
         <text x="827" y="60" fill="#e8edf3" font-size="13" text-anchor="middle" font-weight="bold">TFT 顯示</text>
-        <text x="827" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">→ nRF24*</text>
+        <text x="827" y="80" fill="#94a3b5" font-size="11" text-anchor="middle">+ 語音回應*</text>
       </g>
-      <text x="440" y="130" fill="#94a3b5" font-size="11.5" text-anchor="middle">* 指令 → 飛行控制鏈路之銜接為下一階段工作(測試與驗證章)</text>
+      <text x="440" y="130" fill="#94a3b5" font-size="11.5" text-anchor="middle">* 指令已接入控制鏈路(單馬達展示模式,詳見 §D.4.2)</text>
     </svg>
     <div class="cap">圖 D-1 Mode 10 語音指令辨識管線(端到端延遲約 3 秒)</div>
   </div>
@@ -90,8 +90,25 @@
   </ul>
 
   <div class="callout">
-    <b>頻段共存說明:</b>WiFi 與 nRF24 同處 2.4 GHz。Mode 10 測試程式運作時不啟用 nRF24;正式整合時將採分時策略 —— 語音辨識期間暫停控制鏈路屬不可接受之安全風險,故規劃改以本地離線辨識(ESP-SR)從根本移除 WiFi 依賴。
+    <b>頻段共存:</b>WiFi 工作於 ≤2.472 GHz,nRF24 控制鏈路選用 CH 88(2.488 GHz)—— 頻率錯開使兩射頻可同時運作。整合實測:語音辨識期間 50 Hz 控制鏈路不中斷。
   </div>
+</section>
+
+<section>
+  <h2><span class="no">D.4</span>主程式整合(雙核心架構)</h2>
+  <p>語音管線已整合進地面站主程式,關鍵為<b>雙核心任務分工</b>:</p>
+  <div class="table-scroll"><table>
+    <tr><th>核心</th><th>任務</th><th>說明</th></tr>
+    <tr><td>核心 1(主迴圈)</td><td>50 Hz 飛行控制</td><td>搖桿取樣、nRF24 收發、TFT 顯示、PTT 偵測 —— 不含任何阻塞呼叫</td></tr>
+    <tr><td>核心 0(語音任務)</td><td>語音管線</td><td>I²S 錄音、WiFi TLS 上傳、STT 與 LLM 解析 —— 阻塞數秒亦不影響控制</td></tr>
+  </table></div>
+  <p>跨核心通訊採「單寫者」共享變數:主迴圈寫 PTT 與模式狀態,語音任務寫解析結果與狀態字串,以 fresh 旗標交接,無鎖設計。I²S 採全雙工配置 —— 麥克風(RX)與擴大機(TX)共用 BCLK / WS 時脈線。</p>
+
+  <h3>D.4.1 語音回應(closed-loop 確認)</h3>
+  <p>指令解析完成後,喇叭以合成語音回覆確認(「收到,起飛」「轉一號馬達」「聽不懂,請再說一次」)。因回應句為固定集合,採<b>預錄方案</b>:以語音合成(zh-TW)離線產生 8 句 WAV 存於 SD 卡,辨識完成即時播放 —— 零額外延遲、不占 API 額度、離線可用。</p>
+
+  <h3>D.4.2 安全映射:單馬達展示模式</h3>
+  <p>於姿態控制完全調校前,語音指令採<b>保守映射</b>(編譯期旗標切換):「起飛」「轉 N 號馬達」→ 指定單顆馬達以低 PWM 輕轉 3 秒後自動停止;飛行控制器端僅於<b>未武裝且油門收底</b>時受理,武裝後自動失效。完整飛行映射(虛擬搖桿:起飛 / 懸停 / 移動 / 降落,含搖桿即時搶回機制)程式已完成,待飛行調校成熟後以單一旗標啟用。</p>
 </section>
 
 <div class="pager">

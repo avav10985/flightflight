@@ -54,7 +54,8 @@
     <tr><td><b>姿態自穩飛行</b></td><td>自寫飛控:互補濾波姿態估計 + 三軸 PID 閉環控制,搖桿放開自動回水平。PID 控制原理參考 <a class="cite" href="testing.html#refs">[4]</a></td><td class="st-done">可飛行</td></tr>
     <tr><td><b>無線遙控與遙測</b></td><td>nRF24 2.4 GHz 雙向鏈路:50 Hz 指令下行,姿態 / 高度 / 航向 / GPS 即時回傳並顯示於手把彩色螢幕</td><td class="st-done">已完成</td></tr>
     <tr><td><b>線上 PID 調參與遠端校準</b></td><td>飛行中透過手把選單即時調整控制增益、遠端觸發 IMU 校準,結果斷電保存</td><td class="st-done">已完成</td></tr>
-    <tr><td><b>AI 語音控制</b></td><td>對手把說「起飛」「向前飛三秒」,雲端語音辨識 + 大型語言模型解析為飛行指令。設計參考 ESP32 語音助理相關作品 <a class="cite" href="testing.html#refs">[1][2][3]</a></td><td class="st-part">辨識管線完成</td></tr>
+    <tr><td><b>AI 語音控制與回應</b></td><td>對手把說「轉一號馬達」:雲端語音辨識 + LLM 解析 → 飛機馬達動作,喇叭以合成語音回覆「轉一號馬達」。語音管線跑於第二核心,50 Hz 控制不中斷。設計參考 ESP32 語音助理相關作品 <a class="cite" href="testing.html#refs">[1][2][3]</a></td><td class="st-done">單馬達展示可用</td></tr>
+    <tr><td><b>媒體播放(Mode 12)</b></td><td>地面站獨立媒體模式:SD 卡影片(MJPEG 15fps,聲音時鐘同步)與音樂播放,含選單、音量、暫停控制</td><td class="st-done">已完成</td></tr>
     <tr><td><b>GPS 定點導航</b></td><td>自動飛向指定座標:導航計算與狀態機完成,待接入控制環</td><td class="st-part">部分完成</td></tr>
     <tr><td><b>第一人稱即時影像</b></td><td>機載 ESP32-CAM WiFi 串流,飛行中可調畫質;頭部追蹤雲台原型已驗證</td><td class="st-done">已完成</td></tr>
     <tr><td><b>多層飛行安全機制</b></td><td>開機鎖定、模式白名單、油門武裝條件、1 秒失聯自動斷電</td><td class="st-done">已完成</td></tr>

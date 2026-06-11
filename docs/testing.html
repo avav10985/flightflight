@@ -26,10 +26,16 @@
 <section>
   <h2><span class="no">E.1</span>實機展示</h2>
   <p>實際飛行測試、地面站操作與語音控制之照片與影片紀錄。</p>
-  <!-- 媒體檔案放 docs/media/,在下方 media-grid 加 figure 即可:
-       <figure><img src="media/檔名.jpg" alt="說明"><figcaption>說明文字</figcaption></figure>
-       <figure><video src="media/檔名.mp4" controls></video><figcaption>說明文字</figcaption></figure> -->
-  <div class="media-placeholder">📷 照片與影片整理中</div>
+  <div class="media-grid">
+    <figure><img src="media/drone-front.jpg" alt="飛機正面" loading="lazy"><figcaption>飛行器本體(正面)— 自組機架與飛控</figcaption></figure>
+    <figure><img src="media/drone-top.jpg" alt="飛機上方" loading="lazy"><figcaption>飛行器俯視 — 感測器與接線配置</figcaption></figure>
+    <figure><img src="media/handle-front.jpg" alt="地面站正面" loading="lazy"><figcaption>地面站(手把 V2-A)— 雙搖桿 + 2.8" TFT</figcaption></figure>
+    <figure><img src="media/boot-screen.jpg" alt="開機自檢畫面" loading="lazy"><figcaption>開機自檢 — nRF24 / SD 狀態與上次重啟原因</figcaption></figure>
+    <figure><img src="media/mode00.jpg" alt="Mode 00 畫面" loading="lazy"><figcaption>Mode 00 安全 / 校準模式畫面</figcaption></figure>
+    <figure><img src="media/mode01.jpg" alt="Mode 01 畫面" loading="lazy"><figcaption>Mode 01 手動自穩 — 即時姿態與遙測顯示</figcaption></figure>
+    <figure><img src="media/pid-menu.jpg" alt="PID 調參選單" loading="lazy"><figcaption>PID 線上調參選單(含遠端校準觸發)</figcaption></figure>
+    <figure><video src="media/mode12-demo.mp4" controls preload="metadata"></video><figcaption>Mode 12 媒體模式實機展示(影片)</figcaption></figure>
+  </div>
 </section>
 
 <section>
@@ -114,14 +120,14 @@
   <div class="table-scroll"><table>
     <tr><th>項目</th><th>內容</th><th>優先序</th></tr>
     <tr><td>本地離線語音辨識</td><td>導入 Espressif ESP-SR(AFE + MultiNet),以拼音定義中文命令詞於裝置端直接辨識;消除網路依賴、速率限制與雲端延遲(目標 &lt; 1 s)。需自行打包中文模型(mn6_cn)至 flash model 分區</td><td>高</td></tr>
-    <tr><td>語音指令 → 控制鏈路銜接</td><td>將 Mode 10 解析所得 action 轉換為 Signal 封包序列,經 nRF24 注入飛行控制(含逾時回復搖桿控制之安全機制)</td><td>高</td></tr>
+    <tr><td>語音完整飛行映射</td><td>單馬達展示已完成;姿態調校成熟後啟用完整虛擬搖桿映射(起飛/懸停/移動/降落,程式已備妥,旗標切換)</td><td>高</td></tr>
     <tr><td>GPS 導航閉環</td><td>Mode 02 導航輸出(目標 roll / pitch)接入 PID 設定點,完成定點飛行閉環;需戶外定位精度驗證</td><td>中</td></tr>
     <tr><td>氣壓定高與自動降落</td><td>BMP280 高度估計 + 油門軸 PID 實現高度保持;雷射近地距離輔助自動降落</td><td>中</td></tr>
     <tr><td>雷射避障</td><td>VL53L0X × 4 <b>硬體已全數安裝</b>(TCA9548A 多工);待實作多方向距離監測與避障迴避邏輯,與 GPS 導航整合</td><td>中</td></tr>
     <tr><td>SD 卡資料記錄</td><td>硬體已驗證(獨立 SPI3 掛載成功);待實作飛行紀錄寫入與音訊播放功能</td><td>中</td></tr>
     <tr><td>頭部追蹤雲台</td><td>手機 IMU(DeviceOrientation API)→ WiFi → 機載雙伺服雲台;原型已驗證,待整合至主程式</td><td>低</td></tr>
     <tr><td>Mode 11 PC 控制</td><td>USB Serial 透明橋接,由電腦端程式直接控制飛行,作為演算法實驗介面</td><td>低</td></tr>
-    <tr><td>地面站體驗強化</td><td>TFT 常駐選單(肩鍵長按呼出)、SD 音樂播放、語音 TTS 回覆(MAX98357A 硬體已就緒)</td><td>低</td></tr>
+    <tr><td>地面站體驗強化</td><td>TFT 常駐選單(肩鍵長按呼出);媒體播放與語音回應已完成</td><td>低</td></tr>
   </table></div>
 </section>
 

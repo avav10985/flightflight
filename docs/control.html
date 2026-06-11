@@ -34,9 +34,10 @@
     <tr><td><code>00</code></td><td>安全 / 校準</td><td>馬達強制鎖定;進入瞬間自動觸發快速校準;可執行完整校準與 PID 調參(§C.4)</td><td class="st-done">已完成</td></tr>
     <tr><td><code>01</code></td><td>手動自穩</td><td>搖桿設定目標角度,PID 維持姿態 —— 目前唯一允許武裝之模式</td><td class="st-done">已完成</td></tr>
     <tr><td><code>02</code></td><td>GPS 定點導航</td><td>自動飛向目標座標;距離 / 方位角計算與導航狀態機完成,待接入 PID 設定點</td><td class="st-part">部分完成</td></tr>
-    <tr><td><code>10</code></td><td>語音控制</td><td>雲端 STT + LLM 指令解析(語音子系統章);辨識管線已驗證,待接入控制鏈</td><td class="st-part">部分完成</td></tr>
+    <tr><td><code>10</code></td><td>語音控制</td><td>雲端 STT + LLM 解析 + 語音回應(語音子系統章);現階段安全映射為單馬達展示,完整飛行映射程式已備妥待解鎖</td><td class="st-done">展示可用</td></tr>
     <tr><td><code>11</code></td><td>PC 控制</td><td>USB Serial 透明橋接,由電腦端程式控制</td><td class="st-todo">規劃中</td></tr>
-    <tr><td><code>12</code> <code>20</code> <code>21</code> <code>22</code></td><td>預留</td><td>—</td><td class="st-todo">—</td></tr>
+    <tr><td><code>12</code></td><td>媒體模式</td><td>地面站本地功能:SD 影片 / 音樂播放器(非飛行模式,飛機自動鎖定)</td><td class="st-done">已完成</td></tr>
+    <tr><td><code>20</code> <code>21</code> <code>22</code></td><td>預留</td><td>—</td><td class="st-todo">—</td></tr>
   </table></div>
 
   <h3>C.1.2 武裝(Arm)安全鏈</h3>
