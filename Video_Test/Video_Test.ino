@@ -9,7 +9,7 @@
 //   /video.wav  — 聲音(32kHz / 單聲道 / 16-bit PCM)
 //
 // === 電腦轉檔指令(ffmpeg,橫向 320×240 @ 20fps)===
-//   ffmpeg -i 影片.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=20" -q:v 7 video.mjp
+//   ffmpeg -i 影片.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=20" -q:v 7 -f mjpeg video.mjp
 //   ffmpeg -i 影片.mp4 -ar 32000 -ac 1 -sample_fmt s16 video.wav
 //
 // === 接線(全部沿用手把現有配置,不用改線)===
