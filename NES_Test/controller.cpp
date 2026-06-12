@@ -32,14 +32,16 @@ extern "C" uint32_t controller_read_input()
   if (joyX < 1024)      r = 0;   // 推右(反相:右 = 低)
   else if (joyX > 3072) l = 0;   // 推左
 
-  // 肩鈕:A = 右肩、B = 左肩
+  // A = 右肩鈕;B = 按鍵叢「+」鍵(左肩太難按,2026-06-12 改)
+  // 左肩保留當備用 B(兩個都能用)
   a = digitalRead(PIN_BTN_A);
   b = digitalRead(PIN_BTN_B);
 
   // 按鍵叢階梯(閾值同 Ground_TX):>3300 加 / >2300 減 / >1550 OK / >600 返回
   int v = analogRead(PIN_BTN_LADDER);
-  if (v > 1550 && v <= 2300)     t = 0;   // OK  → Start
-  else if (v > 600 && v <= 1550) s = 0;   // 返回 → Select
+  if (v > 3300)                  b = 0;   // 「+」 → B(主力)
+  else if (v > 1550 && v <= 2300) t = 0;  // OK  → Start
+  else if (v > 600 && v <= 1550)  s = 0;  // 返回 → Select
 
   return 0xFFFFFFFF ^ ((!u << 0) | (!d << 1) | (!l << 2) | (!r << 3) |
                        (!s << 4) | (!t << 5) | (!a << 6) | (!b << 7));
