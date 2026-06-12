@@ -60,7 +60,8 @@ static uint16_t lineBuf[NES_SCREEN_WIDTH];
 extern void display_begin()
 {
     tft.init();
-    tft.setRotation(3);   // 橫向 320×240(畫面顛倒就改 1)
+    tft.setRotation(2);   // 直式 240×320(跟手把其他程式同向)
+                          // NES 256 寬 → 裁兩側各 8px 顯示 240 寬,可接受
     bg_color = tft.color565(24, 28, 24);
     tft.fillScreen(bg_color);
 }

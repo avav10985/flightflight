@@ -9,8 +9,10 @@
 
 #define FSROOT "/fs"
 
-/* 聲音:MAX98357A 外部 I2S DAC(手把 V2-B 腳位) */
-#define HW_AUDIO
+/* 聲音:MAX98357A 外部 I2S DAC(手把 V2-B 腳位)
+ * ⚠ 暫時關閉做切分測試:畫面出現後消失疑似崩潰,聲音的
+ *   legacy I2S 驅動是頭號嫌疑。畫面穩了再開回來修聲音 */
+// #define HW_AUDIO
 #define HW_AUDIO_SAMPLERATE 22050
 #define HW_AUDIO_EXTDAC
 #define HW_AUDIO_EXTDAC_BCLK 11

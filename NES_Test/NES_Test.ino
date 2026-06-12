@@ -46,6 +46,21 @@ void setup()
   display_begin();
   display_message("display OK");
 
+  // 上次重啟原因:抓「圖標出現又消失」是不是崩潰重開迴圈
+  {
+    esp_reset_reason_t rr = esp_reset_reason();
+    const char* rs = (rr == ESP_RST_POWERON) ? "poweron" :
+                     (rr == ESP_RST_PANIC)   ? "PANIC!" :
+                     (rr == ESP_RST_TASK_WDT)? "TASK WDT!" :
+                     (rr == ESP_RST_INT_WDT) ? "INT WDT!" :
+                     (rr == ESP_RST_BROWNOUT)? "BROWNOUT!" :
+                     (rr == ESP_RST_SW)      ? "sw-reset" : "other";
+    char buf[40];
+    snprintf(buf, sizeof(buf), "last reset: %s", rs);
+    display_message(buf);
+    delay(800);   // 給時間看清楚
+  }
+
   esp_task_wdt_deinit();  // 模擬器主迴圈會佔滿 CPU,關看門狗
   display_message("wdt off");
 
