@@ -37,12 +37,14 @@ extern void display_message(const char *msg);
 
 void setup()
 {
-  // 顯示最先初始化:畫面變深灰 = setup 有在跑(除錯白畫面用)
+  // Serial 最先(USB 模式除錯用;hwcdc 要等列舉)
+  Serial.begin(115200);
+  delay(1500);
+  Serial.println("=== NES_Test boot ===");
+
+  // 顯示初始化:畫面變深灰 = 有跑到這(電池模式除錯用)
   display_begin();
   display_message("display OK");
-
-  Serial.begin(115200);
-  display_message("serial OK");
 
   esp_task_wdt_deinit();  // 模擬器主迴圈會佔滿 CPU,關看門狗
   display_message("wdt off");

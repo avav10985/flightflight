@@ -68,6 +68,7 @@ extern void display_begin()
 static int msgY = 8;
 extern void display_message(const char *msg)
 {
+    Serial.println(msg);   // USB 模式 TFT 沒電,診斷同步走 Serial
     tft.setTextColor(TFT_ORANGE, bg_color);
     tft.setTextSize(2);
     tft.setCursor(8, msgY);
