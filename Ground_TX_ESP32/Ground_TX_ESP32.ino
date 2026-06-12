@@ -1686,13 +1686,19 @@ String vParseLlama(const String& userText) {
 
 // 從 action JSON 抽欄位 → 寫共享變數
 void vEmitAction(const String& json, const String& transcript) {
+  // 容錯解析:Llama 有時回美化 JSON(冒號後有空格/換行),
+  // 不能假設 "key":"value" 緊貼 → 找 key 後再找冒號、再找下一對引號
   auto field = [&](const char* key) -> String {
-    String pat = String("\"") + key + "\":\"";
+    String pat = String("\"") + key + "\"";
     int i = json.indexOf(pat);
     if (i < 0) return "";
-    int s = i + pat.length();
-    int e = json.indexOf("\"", s);
-    return (e > 0) ? json.substring(s, e) : "";
+    int c = json.indexOf(":", i + pat.length());
+    if (c < 0) return "";
+    int q1 = json.indexOf("\"", c + 1);
+    if (q1 < 0) return "";
+    int q2 = json.indexOf("\"", q1 + 1);
+    if (q2 < 0) return "";
+    return json.substring(q1 + 1, q2);
   };
   String act = field("action");
   char buf[48];
