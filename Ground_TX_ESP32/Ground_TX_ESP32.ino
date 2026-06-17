@@ -118,6 +118,7 @@ LGFX tft;
 #define ENABLE_MUSIC            1   // 任意 mode 都可放音樂(需 SD + MAX98357A,2026-06-12 開)
 #define ENABLE_VIDEO_MODE12     1   // Mode 12:媒體模式,SD /video/*.mjp 影片播放
                                     // (需 ENABLE_MUSIC=1 共用 I²S + JPEGDEC 函式庫)
+#define ENABLE_WIFI_SCAN_MODE22 1   // Mode 22:WiFi 環境掃描(被動,列附近 AP 訊號/通道)
 #define ENABLE_PERSISTENT_MENU  0   // TFT 下方常駐選單(肩鍵 L 長按 1 秒進入)
 #define ENABLE_SD               1   // SD 卡模組:1 = 啟用(2026-06-11 新電源架構後重測。
                                     // 2026-06-09 曾因模組 level shifter 搶 SPI bus 拖爆 NRF24 停用;
@@ -708,6 +709,12 @@ void setup() {
 }
 
 // ============================================================
+#if ENABLE_WIFI_SCAN_MODE22
+void enterScanMode();
+void exitScanMode();
+void scanModeLoop(int btnEdge);
+#endif
+
 void loop() {
   byte mode = readSwitch3(SW_A) * 10 + readSwitch3(SW_B);   // 兩位數編碼:A 十位 + B 個位
 
@@ -766,6 +773,22 @@ void loop() {
   } else if (inVideoMode) {
     inVideoMode = false;
     exitVideoMode();
+    ui = UI_FLIGHT;
+    drawFlightStatic();
+  }
+#endif
+
+#if ENABLE_WIFI_SCAN_MODE22
+  // Mode 22 WiFi 掃描:被動列出附近 AP。接管整個 loop,不送 NRF
+  //(飛機 1 秒沒收到會自動 failsafe disarm,安全)
+  static bool inScanMode = false;
+  if (mode == 22) {
+    if (!inScanMode) { inScanMode = true; enterScanMode(); }
+    scanModeLoop(btnEdge ? btn : BTN_NONE);
+    return;
+  } else if (inScanMode) {
+    inScanMode = false;
+    exitScanMode();
     ui = UI_FLIGHT;
     drawFlightStatic();
   }
@@ -1415,6 +1438,119 @@ void videoModeLoop(int btnEdge) {
   }
 }
 #endif  // ENABLE_VIDEO_MODE12
+
+
+// ============================================================
+// Mode 22:WiFi 環境掃描(被動診斷,2026-06-14)
+//
+// 列出附近 WiFi AP:名稱 / 訊號強度 / 通道 / 加密。純被動(只「聽」
+// 不發射),合法。用 ESP32-S3 內建 WiFi,不用加任何模組。
+// 操作:OK = 重新掃描、+/- = 捲動清單、模式開關撥走 = 離開
+// ============================================================
+#if ENABLE_WIFI_SCAN_MODE22
+#define SCAN_MAX_SHOW 32
+
+int  scanCount  = 0;
+int  scanCursor = 0;
+bool scanBusy   = false;
+
+void drawScanHeader() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 240, 32, TFT_DARKCYAN);
+  tft.setFont(&fonts::efontTW_24);
+  tft.setTextColor(TFT_WHITE, TFT_DARKCYAN);
+  tft.setCursor(18, 4);
+  tft.print("WiFi 環境掃描");
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(5, 300);
+  tft.print("OK:重掃  +/-:捲動  切模式:離開");
+}
+
+void drawScanList() {
+  const int VIS = 8, rowH = 30;
+  tft.fillRect(0, 36, 240, 260, TFT_BLACK);
+  if (scanBusy) {
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(10, 130);
+    tft.print("掃描中...");
+    return;
+  }
+  if (scanCount <= 0) {
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.setCursor(10, 130);
+    tft.print("找不到 WiFi");
+    return;
+  }
+  if (scanCursor > scanCount - 1) scanCursor = scanCount - 1;
+  int top = scanCursor - (scanCursor % VIS);   // 簡單分頁
+  for (int r = 0; r < VIS && top + r < scanCount; r++) {
+    int i = top + r;
+    int y = 38 + r * rowH;
+    bool sel = (i == scanCursor);
+    int rssi = WiFi.RSSI(i);
+    // 訊號強度顏色:強綠 / 中黃 / 弱紅
+    uint16_t sigColor = (rssi > -60) ? TFT_GREEN : (rssi > -75) ? TFT_YELLOW : TFT_RED;
+    bool enc = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+    if (sel) tft.fillRect(0, y, 240, rowH, TFT_NAVY);
+    tft.setFont(&fonts::efontTW_16);
+    // 第一行:鎖頭 + SSID(截斷)
+    tft.setTextColor(sel ? TFT_WHITE : TFT_LIGHTGREY, sel ? TFT_NAVY : TFT_BLACK);
+    tft.setCursor(6, y + 1);
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) ssid = "(隱藏)";
+    if (ssid.length() > 13) ssid = ssid.substring(0, 13);
+    tft.printf("%s%s", enc ? "*" : " ", ssid.c_str());
+    // 第二行:通道 + RSSI(上色)
+    tft.setTextColor(sigColor, sel ? TFT_NAVY : TFT_BLACK);
+    tft.setCursor(150, y + 1);
+    tft.printf("CH%d", WiFi.channel(i));
+    tft.setCursor(150, y + 14);
+    tft.printf("%ddBm", rssi);
+  }
+  // 右下角計數
+  tft.setFont(&fonts::efontTW_14);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setCursor(195, 282);
+  tft.printf("%d/%d", scanCursor + 1, scanCount);
+}
+
+void doScan() {
+  scanBusy = true;
+  drawScanList();
+  WiFi.scanDelete();
+  scanCount = WiFi.scanNetworks(false, true);   // 同步掃,含隱藏
+  if (scanCount > SCAN_MAX_SHOW) scanCount = SCAN_MAX_SHOW;
+  scanCursor = 0;
+  scanBusy = false;
+  drawScanList();
+}
+
+void enterScanMode() {
+#if ENABLE_MUSIC
+  musicStop();
+#endif
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  drawScanHeader();
+  doScan();
+}
+
+void exitScanMode() {
+  WiFi.scanDelete();
+  // WiFi 留著(Mode 10 語音還要用),不關
+}
+
+void scanModeLoop(int btnEdge) {
+  if (btnEdge == BTN_OK) { doScan(); return; }
+  if (scanCount > 0) {
+    if (btnEdge == BTN_PLUS  && scanCursor < scanCount - 1) { scanCursor++; drawScanList(); }
+    if (btnEdge == BTN_MINUS && scanCursor > 0)             { scanCursor--; drawScanList(); }
+  }
+}
+#endif  // ENABLE_WIFI_SCAN_MODE22
 
 
 // ============================================================
