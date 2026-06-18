@@ -286,6 +286,13 @@ int centerMap(int raw, bool reverse) {
   return reverse ? 255 - out : out;
 }
 
+// ESP32 ADC 單次讀會跳幾十,多次取樣平均壓雜訊(12 次約 0.6ms,50Hz 迴圈吃得下)
+int analogReadAvg(int pin) {
+  long s = 0;
+  for (int i = 0; i < 12; i++) s += analogRead(pin);
+  return (int)(s / 12);
+}
+
 byte readSwitch3(int pin) {
   int v = analogRead(pin);
   // 2026-06-06 試燒發現實體開關上下與 ADC 讀值相反,把回傳值對調
@@ -335,9 +342,14 @@ int readMenuBtn() {
 }
 
 void readInputs(byte mode) {
-  data.throttle = centerMap(analogRead(J_THROTTLE), REV_THROTTLE);
-  data.pitch    = centerMap(analogRead(J_PITCH),    REV_PITCH);
-  data.roll     = centerMap(analogRead(J_ROLL),     REV_ROLL);
+  data.throttle = centerMap(analogReadAvg(J_THROTTLE), REV_THROTTLE);
+  data.pitch    = centerMap(analogReadAvg(J_PITCH),    REV_PITCH);
+  data.roll     = centerMap(analogReadAvg(J_ROLL),     REV_ROLL);
+
+  // 中位死區:搖桿放中間時殘餘 ±幾 的抖動歸零,送出穩定中立 127
+  if (abs((int)data.pitch - 127) <= 3) data.pitch = 127;
+  if (abs((int)data.roll  - 127) <= 3) data.roll  = 127;
+  if (data.throttle <= 4) data.throttle = 0;   // 油門到底吸成 0,怠速穩定
 
   // yaw 由肩鍵：L→42、R→212、都沒按/同時按→127（對應 ±60°/s）
   // mode 10 例外:左肩鈕是語音 PTT,yaw 固定中立(語音 yaw 之後再說)
@@ -472,21 +484,22 @@ void drawFlightDynamic(byte mode) {
     static int16_t lastRoll = -32000, lastPitch = -32000, lastYaw = -32000;
     tft.setFont(&fonts::efontTW_24);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    if (tele.roll != lastRoll || g_flightDirty) {
+    // 重畫門檻(deg×10):靜止時 ±0.x° 感測雜訊不重畫,不閃也不延遲真實值
+    if (abs(tele.roll - lastRoll) >= 8 || g_flightDirty) {
       tft.fillRect(10, 80, 200, 30, TFT_BLACK);
       tft.setCursor(10, 80);
       snprintf(buf, sizeof(buf), "%+7.1f °", tele.roll / 10.0);
       tft.print(buf);
       lastRoll = tele.roll;
     }
-    if (tele.pitch != lastPitch || g_flightDirty) {
+    if (abs(tele.pitch - lastPitch) >= 8 || g_flightDirty) {
       tft.fillRect(10, 160, 200, 30, TFT_BLACK);
       tft.setCursor(10, 160);
       snprintf(buf, sizeof(buf), "%+7.1f °", tele.pitch / 10.0);
       tft.print(buf);
       lastPitch = tele.pitch;
     }
-    if (tele.yawRate != lastYaw || g_flightDirty) {
+    if (abs(tele.yawRate - lastYaw) >= 20 || g_flightDirty) {
       tft.fillRect(10, 240, 230, 30, TFT_BLACK);
       tft.setCursor(10, 240);
       snprintf(buf, sizeof(buf), "%+7.1f °/秒", tele.yawRate / 10.0);
