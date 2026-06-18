@@ -134,7 +134,13 @@ struct Telemetry {
   uint8_t  satCount;    // GPS 衛星數
   int32_t  lat_e7;      // 緯度 × 10^7
   int32_t  lon_e7;      // 經度 × 10^7
-};   // 20 bytes(NRF24 ACK payload max 32)
+  // 2026-06-18 回傳目前 PID(各 ×1000 存 int16),手把開機同步顯示 + 存檔確認
+  int16_t  kp_rp_m;     // Kp_rp × 1000
+  int16_t  ki_rp_m;     // Ki_rp × 1000
+  int16_t  kd_rp_m;     // Kd_rp × 1000
+  int16_t  kp_y_m;      // Kp_y  × 1000
+  int16_t  ki_y_m;      // Ki_y  × 1000
+};   // 30 bytes(對齊補到 32,= NRF24 ACK payload 上限,FC/手把必須一起重燒)
 // 2026-06-09 移除 battery_mV(使用者沒裝電池分壓),改放 altitude + heading
 
 // Telemetry.status 位元定義
@@ -746,6 +752,13 @@ void buildTelemetry() {
   tele.satCount   = gps_sat;
   tele.lat_e7     = gps_fix ? (int32_t)(gps_lat * 1e7) : 0;
   tele.lon_e7     = gps_fix ? (int32_t)(gps_lon * 1e7) : 0;
+
+  // 目前 PID 回傳(×1000),手把用來開機同步 + 存檔確認
+  tele.kp_rp_m = (int16_t)(Kp_rp * 1000);
+  tele.ki_rp_m = (int16_t)(Ki_rp * 1000);
+  tele.kd_rp_m = (int16_t)(Kd_rp * 1000);
+  tele.kp_y_m  = (int16_t)(Kp_y  * 1000);
+  tele.ki_y_m  = (int16_t)(Ki_y  * 1000);
 }
 
 void applyCommand() {

@@ -208,7 +208,13 @@ struct Telemetry {
   uint8_t  satCount;    // GPS 衛星數
   int32_t  lat_e7;      // 緯度 ×10^7
   int32_t  lon_e7;      // 經度 ×10^7
-};   // 20 bytes(NRF24 ACK Payload 上限 32)
+  // 2026-06-18 飛機回傳目前 PID(各 ×1000),開機同步顯示 + 存檔確認
+  int16_t  kp_rp_m;     // Kp_rp × 1000
+  int16_t  ki_rp_m;     // Ki_rp × 1000
+  int16_t  kd_rp_m;     // Kd_rp × 1000
+  int16_t  kp_y_m;      // Kp_y  × 1000
+  int16_t  ki_y_m;      // Ki_y  × 1000
+};   // 30 bytes(對齊 32 = ACK 上限,**必須跟飛機端一起重燒**)
 
 // status 位元定義(跟飛機端一致)
 #define STATUS_ARMED         0x01   // bit0:已 armed
@@ -330,6 +336,24 @@ unsigned long g_paramHoldUntil = 0;
 // 最近一次收到遙測的時刻:判斷飛機是否真的在線(校準結果不能在飛機沒開時誤報完成)
 unsigned long g_lastTeleMs = 0;
 
+// PID:開機收到第一筆有效遙測後,把選單值同步成飛機的實際 PID(一次性,之後手把端為主)
+bool          g_pidSynced    = false;
+unsigned long g_pidSaveUntil = 0;   // 顯示「PID 已存」確認屏到此 millis
+
+// 把選單 PID(前 5 列)同步成飛機回傳的實際值。只在開機第一筆有效遙測時做一次,
+// 之後手把端為準(使用者調的值送給飛機,不再被回傳覆蓋)。
+void syncPidFromTele() {
+  // 防呆:飛機若還是舊韌體(沒回傳 PID),欄位會是 0/垃圾 → Kp 不可能 ≤0,跳過不同步
+  if (tele.kp_rp_m <= 0 || tele.kp_rp_m > 30000) return;
+  params[0].val = tele.kp_rp_m / 1000.0f;   // Kp
+  params[1].val = tele.ki_rp_m / 1000.0f;   // Ki
+  params[2].val = tele.kd_rp_m / 1000.0f;   // Kd
+  params[3].val = tele.kp_y_m  / 1000.0f;   // KpY
+  params[4].val = tele.ki_y_m  / 1000.0f;   // KiY
+  g_pidSynced = true;
+  g_menuDirty = true;   // 選單若正開著,強制重畫成新值
+}
+
 // 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
 // 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
 int readMenuBtn() {
@@ -399,6 +423,7 @@ void handleMenuButton(int btn) {
       g_paramHoldUntil = millis() + 400;   // 重送窗口,避免丟包漏掉
       if (p.id == 100) triggerCalPrompt("快速校準", 700);    // FC 阻塞 ~0.3s
       if (p.id == 101) triggerCalPrompt("完整校準", 2200);   // FC 阻塞 ~1.5s + 餘裕
+      if (p.id == 102) g_pidSaveUntil = millis() + 2800;     // 顯示「PID 已存」確認屏
     }
   } else {
     if (btn == BTN_PLUS)  p.val += p.step;
@@ -590,11 +615,35 @@ void drawMenuDynamic() {
   g_menuDirty = false;
 }
 
-// 校準提示全畫面 modal:回傳 true 代表 modal 正佔用畫面,呼叫端應跳過一般繪製。
-// 由 triggerCalPrompt() 設定的時間窗驅動;結束後讀 telemetry 的 fail bit 顯示成敗。
+// 全畫面 modal(校準提示 / PID 存檔確認):回傳 true 代表 modal 正佔用畫面,
+// 呼叫端應跳過一般繪製。結束後自動還原底層畫面。
 bool drawCalOverlay() {
-  static uint8_t shown = 0;            // 0=無 modal、1=校準中、2=結果
+  static uint8_t shown = 0;            // 0=無 modal、1=校準中、2=校準結果、3=PID已存
   static unsigned long resultUntil = 0;
+
+  // --- PID 已存確認(讀飛機回傳的實際 PID 顯示)---
+  if (millis() < g_pidSaveUntil) {
+    if (shown != 3) {
+      bool live = (millis() - g_lastTeleMs < 1000);
+      char b[44];
+      tft.fillScreen(TFT_DARKGREEN);
+      tft.setFont(&fonts::efontTW_24);
+      tft.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+      tft.setCursor(25, 25); tft.print("PID 已存飛機");
+      tft.setFont(&fonts::efontTW_16);
+      if (live) {
+        snprintf(b, sizeof(b), "Kp  %.3f", tele.kp_rp_m / 1000.0f); tft.setCursor(20, 85);  tft.print(b);
+        snprintf(b, sizeof(b), "Ki  %.3f", tele.ki_rp_m / 1000.0f); tft.setCursor(20, 115); tft.print(b);
+        snprintf(b, sizeof(b), "Kd  %.3f", tele.kd_rp_m / 1000.0f); tft.setCursor(20, 145); tft.print(b);
+        snprintf(b, sizeof(b), "KpY %.3f", tele.kp_y_m  / 1000.0f); tft.setCursor(20, 175); tft.print(b);
+        snprintf(b, sizeof(b), "KiY %.3f", tele.ki_y_m  / 1000.0f); tft.setCursor(20, 205); tft.print(b);
+      } else {
+        tft.setCursor(20, 120); tft.print("飛機未連線,無法確認值");
+      }
+      shown = 3;
+    }
+    return true;
+  }
 
   // --- 校準中(由手把觸發時刻 + 預估阻塞時間驅動)+ 進度條 ---
   if (millis() < g_calBusyUntil) {
@@ -935,6 +984,7 @@ void loop() {
       radio.read(&tele, sizeof(tele));
       teleOK = true;
       g_lastTeleMs = millis();
+      if (!g_pidSynced) syncPidFromTele();   // 開機第一筆遙測 → 選單顯示飛機實際 PID
     }
   } else {
     txFail++;
