@@ -304,12 +304,14 @@ bool g_menuDirty   = false;
 // FC 校準時 sampleIMU() 會阻塞 0.3~1.5 秒,期間不回 telemetry,所以「校準中」
 // 不能等 telemetry 的 STATUS_CALIBRATING(手把根本收不到那個瞬間),改由手把
 // 「自己送出校準觸發」的時刻驅動;校準中結束後再讀 STATUS_CAL_FAILED 判成敗。
+unsigned long g_calBusyStart    = 0;    // 校準開始 millis(算進度條用)
 unsigned long g_calBusyUntil    = 0;    // 顯示「校準中」到此 millis
 const char*   g_calBusyName     = "";   // "快速校準" / "完整校準"
 bool          g_calResultPending = false; // 校準中結束後,要顯示一次成敗
 
 void triggerCalPrompt(const char* name, unsigned long durMs) {
   g_calBusyName      = name;
+  g_calBusyStart     = millis();
   g_calBusyUntil     = millis() + durMs;
   g_calResultPending = true;
 }
@@ -581,19 +583,26 @@ bool drawCalOverlay() {
   static uint8_t shown = 0;            // 0=無 modal、1=校準中、2=結果
   static unsigned long resultUntil = 0;
 
-  // --- 校準中(由手把觸發時刻 + 預估阻塞時間驅動)---
+  // --- 校準中(由手把觸發時刻 + 預估阻塞時間驅動)+ 進度條 ---
   if (millis() < g_calBusyUntil) {
     if (shown != 1) {
       tft.fillScreen(TFT_NAVY);
       tft.setFont(&fonts::efontTW_24);
       tft.setTextColor(TFT_YELLOW, TFT_NAVY);
-      tft.setCursor(55, 95); tft.print("校準中…");
-      tft.setFont(&fonts::efontTW_14);
+      tft.setCursor(55, 70); tft.print("校準中…");
+      tft.setFont(&fonts::efontTW_16);
       tft.setTextColor(TFT_WHITE, TFT_NAVY);
-      tft.setCursor(20, 140); tft.print(g_calBusyName);
-      tft.setCursor(20, 170); tft.print("機體放平、保持不動");
+      tft.setCursor(20, 115); tft.print(g_calBusyName);
+      tft.setFont(&fonts::efontTW_14);
+      tft.setCursor(20, 150); tft.print("機體放平、保持不動");
+      tft.drawRect(20, 195, 200, 24, TFT_WHITE);   // 進度條外框
       shown = 1;
     }
+    // 進度條填充:每次重繪更新(觸發→結束的時間比例),只增不減免清背景
+    unsigned long total = g_calBusyUntil - g_calBusyStart;
+    long w = total ? (long)(196 * (millis() - g_calBusyStart) / total) : 196;
+    if (w < 0) w = 0; if (w > 196) w = 196;
+    tft.fillRect(22, 197, (int)w, 20, TFT_GREEN);
     return true;
   }
 
