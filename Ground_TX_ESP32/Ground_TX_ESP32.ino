@@ -318,6 +318,9 @@ void triggerCalPrompt(const char* name, unsigned long durMs) {
 // 避免 nRF24 偶爾丟一包就漏掉(FC 端 lastID/lastVal 去重,重送只會套用一次)
 unsigned long g_paramHoldUntil = 0;
 
+// 最近一次收到遙測的時刻:判斷飛機是否真的在線(校準結果不能在飛機沒開時誤報完成)
+unsigned long g_lastTeleMs = 0;
+
 // 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
 // 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
 int readMenuBtn() {
@@ -594,18 +597,26 @@ bool drawCalOverlay() {
     return true;
   }
 
-  // --- 校準中剛結束 → 讀 telemetry 顯示一次成敗 ---
+  // --- 校準中剛結束 → 讀 telemetry 顯示一次結果 ---
+  // 三態:飛機沒連線(收不到遙測)→ 不能說完成;有連線再分成功/失敗
   if (g_calResultPending) {
     g_calResultPending = false;
-    bool failed = teleOK && (tele.status & STATUS_CAL_FAILED);
-    tft.fillScreen(failed ? TFT_MAROON : TFT_DARKGREEN);
+    bool linkAlive = (millis() - g_lastTeleMs < 1000);   // 校準視窗結束時應已有新鮮遙測
+    bool failed    = tele.status & STATUS_CAL_FAILED;
     tft.setFont(&fonts::efontTW_24);
     tft.setTextColor(TFT_WHITE);
-    if (failed) {
+    if (!linkAlive) {
+      tft.fillScreen(TFT_DARKGREY);
+      tft.setCursor(30, 95);  tft.print("飛機未連線");
+      tft.setFont(&fonts::efontTW_14);
+      tft.setCursor(15, 145); tft.print("沒收到回應,校準未確認");
+    } else if (failed) {
+      tft.fillScreen(TFT_MAROON);
       tft.setCursor(45, 95);  tft.print("校準失敗");
       tft.setFont(&fonts::efontTW_14);
       tft.setCursor(15, 145); tft.print("偵測到晃動,放平後重試");
     } else {
+      tft.fillScreen(TFT_DARKGREEN);
       tft.setCursor(45, 95);  tft.print("校準完成");
     }
     shown = 2;
@@ -812,6 +823,7 @@ void loop() {
     if (vok && radio.isAckPayloadAvailable()) {
       radio.read(&tele, sizeof(tele));
       teleOK = true;
+      g_lastTeleMs = millis();
     }
     voiceModeUi();
 #if ENABLE_MUSIC
@@ -900,6 +912,7 @@ void loop() {
     if (radio.isAckPayloadAvailable()) {
       radio.read(&tele, sizeof(tele));
       teleOK = true;
+      g_lastTeleMs = millis();
     }
   } else {
     txFail++;
