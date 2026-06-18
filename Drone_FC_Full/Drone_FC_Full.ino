@@ -188,6 +188,9 @@ const int16_t MOTION_GYRO_THRESHOLD = 500;
 bool          isCalibrating = false;
 bool          lastCalFailed = false;
 
+// ESC 油門行程校準中:主迴圈不可碰馬達,由校準指令獨佔 ESC 輸出
+bool          escCalActive = false;
+
 // GPS 狀態
 double        gps_lat = 0;
 double        gps_lon = 0;
@@ -1010,6 +1013,9 @@ void pidControl() {
 }
 
 void writeMotors() {
+  // ESC 油門行程校準進行中:由 esccal/esccalmin 指令獨佔 ESC 輸出,主迴圈不碰
+  if (escCalActive) return;
+
   if (!armed) {
     // 語音 demo:未武裝時轉指定那顆,時間到自動停
     if (demoMotor >= 1 && demoMotor <= 4 && millis() < demoUntil) {
@@ -1086,6 +1092,29 @@ void parseSerial() {
   } else if (s == "calclear") {
     clearCalibration();
     Serial.println("[!] NVS 已清,offset 全部歸 0");
+  } else if (s == "esccal") {
+    // SimonK ESC 油門行程校準 — 步驟 1:輸出滿油門
+    // ⚠️ 一定要先拔掉所有螺旋槳!此時飛行電池『還沒插』,FC 用 USB 供電。
+    escCalActive = true;
+    esc1.writeMicroseconds(2000);
+    esc2.writeMicroseconds(2000);
+    esc3.writeMicroseconds(2000);
+    esc4.writeMicroseconds(2000);
+    Serial.println(">> ====== ESC 校準:步驟 1/2 滿油門 ======");
+    Serial.println(">> ⚠️ 確認螺旋槳已全部拔掉!");
+    Serial.println(">> 現在『插上飛行電池』→ ESC 會嗶幾聲(記住最高油門點)");
+    Serial.println(">> 聽到嗶聲後,送指令  esccalmin  進入步驟 2");
+  } else if (s == "esccalmin") {
+    // 步驟 2:輸出最低油門 → ESC 記住最低點 + 入彈
+    esc1.writeMicroseconds(1000);
+    esc2.writeMicroseconds(1000);
+    esc3.writeMicroseconds(1000);
+    esc4.writeMicroseconds(1000);
+    delay(500);
+    escCalActive = false;   // 解除獨佔:此後 !armed → 主迴圈持續送 1000(停),安全
+    Serial.println(">> ====== ESC 校準:步驟 2/2 最低油門 ======");
+    Serial.println(">> ESC 會再嗶(確認最低點)→ 接著入彈長嗶 → 校準完成");
+    Serial.println(">> 拔掉飛行電池即可。四顆 ESC 行程已對齊。");
   } else if (s == "gps") {
     if (gps_fix) {
       Serial.printf(">> GPS: lat=%.7f lon=%.7f sat=%d age=%lums\n",
@@ -1199,6 +1228,7 @@ void parseSerial() {
 #endif
   } else {
     Serial.println(">> 指令:kp/ki/kd/ypp/yi <值>、p、cal、calfull、calload、calclear、gps、");
+    Serial.println(">>      esccal → esccalmin(ESC 油門行程校準,先拔槳!)");
     Serial.println(">>      wp <lat> <lon> <alt>、wpclear、wpinfo、homenow、home、yawreset");
 #if ENABLE_HMC5883
     Serial.println(">>      magcal、magshow");

@@ -300,6 +300,24 @@ byte readSwitch3(int pin) {
 bool g_flightDirty = false;
 bool g_menuDirty   = false;
 
+// ---- 校準畫面提示 ----
+// FC 校準時 sampleIMU() 會阻塞 0.3~1.5 秒,期間不回 telemetry,所以「校準中」
+// 不能等 telemetry 的 STATUS_CALIBRATING(手把根本收不到那個瞬間),改由手把
+// 「自己送出校準觸發」的時刻驅動;校準中結束後再讀 STATUS_CAL_FAILED 判成敗。
+unsigned long g_calBusyUntil    = 0;    // 顯示「校準中」到此 millis
+const char*   g_calBusyName     = "";   // "快速校準" / "完整校準"
+bool          g_calResultPending = false; // 校準中結束後,要顯示一次成敗
+
+void triggerCalPrompt(const char* name, unsigned long durMs) {
+  g_calBusyName      = name;
+  g_calBusyUntil     = millis() + durMs;
+  g_calResultPending = true;
+}
+
+// 參數重送窗口:調 PID / 觸發動作後,持續送同一個 paramID 一小段時間,
+// 避免 nRF24 偶爾丟一包就漏掉(FC 端 lastID/lastVal 去重,重送只會套用一次)
+unsigned long g_paramHoldUntil = 0;
+
 // 2026-06-07 試燒實測:+ 3810~3850、− 2640~2690、OK 1910~1940、返回 1160~1200
 // 門檻取中點,邊緣最穩(舊門檻邊緣太靠近實測值,瞬間切換時容易誤觸)
 int readMenuBtn() {
@@ -331,7 +349,10 @@ void readInputs(byte mode) {
   // 進入 mode 0 → 送一次校準旗標（持續 600ms 確保飛機收到 0→1 邊緣）
   static byte lastMode = 255;
   static unsigned long calHoldUntil = 0;
-  if (mode == 0 && lastMode != 0) calHoldUntil = millis() + 600;
+  if (mode == 0 && lastMode != 0) {
+    calHoldUntil = millis() + 600;
+    triggerCalPrompt("進場自動校準", 2400);   // FC 進 mode 0 自動跑 quick+full(~1.8s 阻塞 + 餘裕)
+  }
   lastMode = mode;
   data.flags = (millis() < calHoldUntil) ? 0x01 : 0x00;
 }
@@ -358,6 +379,9 @@ void handleMenuButton(int btn) {
       p.val += 1.0f;
       data.paramID  = p.id;
       data.paramVal = p.val;
+      g_paramHoldUntil = millis() + 400;   // 重送窗口,避免丟包漏掉
+      if (p.id == 100) triggerCalPrompt("快速校準", 700);    // FC 阻塞 ~0.3s
+      if (p.id == 101) triggerCalPrompt("完整校準", 2200);   // FC 阻塞 ~1.5s + 餘裕
     }
   } else {
     if (btn == BTN_PLUS)  p.val += p.step;
@@ -365,6 +389,7 @@ void handleMenuButton(int btn) {
     if (p.val < 0) p.val = 0;
     data.paramID  = p.id;
     data.paramVal = p.val;
+    g_paramHoldUntil = millis() + 400;     // 重送窗口,避免丟包漏掉
   }
 }
 
@@ -545,6 +570,56 @@ void drawMenuDynamic() {
   }
   lastCursor = menuCursor;
   g_menuDirty = false;
+}
+
+// 校準提示全畫面 modal:回傳 true 代表 modal 正佔用畫面,呼叫端應跳過一般繪製。
+// 由 triggerCalPrompt() 設定的時間窗驅動;結束後讀 telemetry 的 fail bit 顯示成敗。
+bool drawCalOverlay() {
+  static uint8_t shown = 0;            // 0=無 modal、1=校準中、2=結果
+  static unsigned long resultUntil = 0;
+
+  // --- 校準中(由手把觸發時刻 + 預估阻塞時間驅動)---
+  if (millis() < g_calBusyUntil) {
+    if (shown != 1) {
+      tft.fillScreen(TFT_NAVY);
+      tft.setFont(&fonts::efontTW_24);
+      tft.setTextColor(TFT_YELLOW, TFT_NAVY);
+      tft.setCursor(55, 95); tft.print("校準中…");
+      tft.setFont(&fonts::efontTW_14);
+      tft.setTextColor(TFT_WHITE, TFT_NAVY);
+      tft.setCursor(20, 140); tft.print(g_calBusyName);
+      tft.setCursor(20, 170); tft.print("機體放平、保持不動");
+      shown = 1;
+    }
+    return true;
+  }
+
+  // --- 校準中剛結束 → 讀 telemetry 顯示一次成敗 ---
+  if (g_calResultPending) {
+    g_calResultPending = false;
+    bool failed = teleOK && (tele.status & STATUS_CAL_FAILED);
+    tft.fillScreen(failed ? TFT_MAROON : TFT_DARKGREEN);
+    tft.setFont(&fonts::efontTW_24);
+    tft.setTextColor(TFT_WHITE);
+    if (failed) {
+      tft.setCursor(45, 95);  tft.print("校準失敗");
+      tft.setFont(&fonts::efontTW_14);
+      tft.setCursor(15, 145); tft.print("偵測到晃動,放平後重試");
+    } else {
+      tft.setCursor(45, 95);  tft.print("校準完成");
+    }
+    shown = 2;
+    resultUntil = millis() + 2500;
+    return true;
+  }
+  if (shown == 2 && millis() < resultUntil) return true;
+
+  // --- 沒有 modal 該顯示:若剛從 modal 退出,還原底層畫面 ---
+  if (shown != 0) {
+    if (ui == UI_FLIGHT) drawFlightStatic(); else drawMenuStatic();
+    shown = 0;
+  }
+  return false;
 }
 
 // ============================================================
@@ -836,13 +911,18 @@ void loop() {
                   txOk, txFail, data.mode, data.throttle);
     txOk = 0; txFail = 0;
   }
-  data.paramID = 0;   // 參數送完清掉
+  if (millis() > g_paramHoldUntil) data.paramID = 0;   // 過了重送窗口才清(期間每包連送,抗丟包)
 
   // TFT 更新（每 150ms）
   if (millis() - lastDrawTime > 150) {
     lastDrawTime = millis();
-    if (ui == UI_FLIGHT) drawFlightDynamic(mode);
-    else                 drawMenuDynamic();
+    if (drawCalOverlay()) {
+      // 校準提示 modal 正佔畫面,跳過一般繪製
+    } else if (ui == UI_FLIGHT) {
+      drawFlightDynamic(mode);
+    } else {
+      drawMenuDynamic();
+    }
   }
 
   delay(20);   // 約 50Hz
