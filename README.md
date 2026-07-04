@@ -24,14 +24,17 @@
 ## 倉庫結構
 
 ```
-Drone_FC_Full/        飛行控制器主程式(LOLIN D32)
-Ground_TX_ESP32/      地面站主程式(ESP32-S3)
-ESP32CAM_Flight/      FPV 影像節點
-Mode10_Test/          語音控制管線獨立驗證
-WiFi_Min_Test/ 等     28 支單元測試程式(每個子系統一支)
-docs/                 技術報告網站(GitHub Pages)
-*.md                  接線總表、程式說明等設計文件
-make_*.py             設計圖產生腳本
+Drone_FC_Full/         飛行控制器主程式(LOLIN D32)
+Ground_TX_ESP32/       地面站主程式(ESP32-S3)
+Ground_TX_OOP/         地面站物件導向重構版
+ESP32CAM_Flight/       FPV 影像節點
+Retro_Go_flightflight/ Retro-Go 遊戲模擬器自訂 target(ESP-IDF)
+測試程式/
+  飛機/                飛機端單元測試(感測器/馬達/相機)
+  手把V2/              手把端單元測試(音訊/語音/SD/媒體/WiFi)
+  遊戲/                NES 模擬器測試
+docs/                  技術報告網站(GitHub Pages)
+*.md                   接線總表、程式說明、進度等設計文件
 ```
 
 ## 編譯需求
