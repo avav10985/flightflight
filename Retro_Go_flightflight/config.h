@@ -23,13 +23,13 @@
 #define RG_AUDIO_USE_INT_DAC        0
 #define RG_AUDIO_USE_EXT_DAC        1
 
-// Video(ILI9341,SPI2,橫向 320x240)
+// Video(ILI9341,SPI2,直向 240x320)
 #define RG_SCREEN_DRIVER            0   // 0 = ILI9341/ST7789
 #define RG_SCREEN_HOST              SPI2_HOST
 #define RG_SCREEN_SPEED             SPI_MASTER_FREQ_40M
 #define RG_SCREEN_BACKLIGHT         0   // 背光直連 3V3 軌常亮,無 GPIO 控制
-#define RG_SCREEN_WIDTH             320
-#define RG_SCREEN_HEIGHT            240
+#define RG_SCREEN_WIDTH             240
+#define RG_SCREEN_HEIGHT            320
 #define RG_SCREEN_ROTATE            0
 #define RG_SCREEN_VISIBLE_AREA      {0, 0, 0, 0}
 #define RG_SCREEN_SAFE_AREA         {0, 0, 0, 0}
@@ -44,7 +44,7 @@
     ILI9341_CMD(0xC1, 0x12);                                                                                     \
     ILI9341_CMD(0xC5, 0x32, 0x3C);                                                                               \
     ILI9341_CMD(0xC7, 0x91);                                                                                     \
-    ILI9341_CMD(0x36, 0x68);                 /* Memory Access Control(橫向;畫面方向不對改這個 byte)*/          \
+    ILI9341_CMD(0x36, 0x08);                 /* Memory Access Control(直向 portrait,左右+上下修正 BGR only)*/           \
     ILI9341_CMD(0xB1, 0x00, 0x10);                                                                               \
     ILI9341_CMD(0xB6, 0x0A, 0xA2);                                                                               \
     ILI9341_CMD(0xF6, 0x01, 0x30);                                                                               \
@@ -62,13 +62,14 @@
     {RG_KEY_DOWN,   ADC_UNIT_1, ADC_CHANNEL_3, ADC_ATTEN_DB_11,    0, 1024},\
     {RG_KEY_RIGHT,  ADC_UNIT_1, ADC_CHANNEL_1, ADC_ATTEN_DB_11,    0, 1024},\
     {RG_KEY_LEFT,   ADC_UNIT_1, ADC_CHANNEL_1, ADC_ATTEN_DB_11, 3072, 4095},\
-    {RG_KEY_B,      ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 3300, 4095},\
+    {RG_KEY_A,      ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 3300, 4095},\
+    {RG_KEY_B,      ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 2301, 3299},\
     {RG_KEY_START,  ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 1550, 2300},\
     {RG_KEY_SELECT, ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11,  600, 1549},\
 }
 #define RG_GAMEPAD_GPIO_MAP {\
-    {RG_KEY_A,    .num = GPIO_NUM_9, .pullup = 1, .level = 0},\
-    {RG_KEY_MENU, .num = GPIO_NUM_8, .pullup = 1, .level = 0},\
+    {RG_KEY_MENU,   .num = GPIO_NUM_8, .pullup = 1, .level = 0},\
+    {RG_KEY_OPTION, .num = GPIO_NUM_9, .pullup = 1, .level = 0},\
 }
 
 // Battery(手把無電池分壓,停用)
