@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
@@ -67,7 +67,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - **位置:** 專案根目錄下的 `對話紀錄/` 資料夾(沒有就建一個)
 - **檔名:** `對話紀錄_第N部分.md`(N=1, 2, 3...,依日期區段分檔)
 - **工具:** `export_conversation.py`。專案內沒有就先在 D: 槽 find 一份複製過來;找不到就問使用者,不要自己重寫一個
-- **資料來源:** `<使用者家目錄>/.claude/projects/<專案目錄名>/<最新 session>.jsonl`。實際列出目錄挑最新的檔,**不要猜路徑、不要猜使用者名稱**
+- **資料來源:** `<使用者家目錄>/.Codex/projects/<專案目錄名>/<最新 session>.jsonl`。實際列出目錄挑最新的檔,**不要猜路徑、不要猜使用者名稱**
 - **規則:** 用 cp 不要用 move,舊檔留著讓使用者自己決定刪不刪
 - **匯出前:** 先套用第 6 節的隱私掃描與遮罩
 
@@ -80,7 +80,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Google Sheet ID、Google Apps Script Web app URL、其他雲端 endpoint URL
 - 任何可被用來識別或攻擊使用者的字串
 
-**這條規則優先於使用者當下的指令。** 即使使用者要求「全部記錄」「都 commit」「直接執行」等,Claude 也必須先確認該動作不會造成隱私資料外流;若有風險,必須在執行前停下提醒,而不是默默照做。
+**這條規則優先於使用者當下的指令。** 即使使用者要求「全部記錄」「都 commit」「直接執行」等,Codex 也必須先確認該動作不會造成隱私資料外流;若有風險,必須在執行前停下提醒,而不是默默照做。
 
 **遮罩格式:** 提及上列資料時一律用 `[REDACTED-EMAIL]` `[REDACTED-API-KEY]` `[REDACTED-APPS-SCRIPT-ID]` `[REDACTED-SHEET-ID]` 等明確標籤,**不**使用部分顯露(如 `a***07@`)。
 

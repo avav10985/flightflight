@@ -38,7 +38,7 @@
     <tr><td>ESP32 / ESP32-S3 開發板</td><td>飛控 / 地面站主控</td><td>雙核心 240 MHz 足以同時跑控制迴圈與通訊;內建 WiFi 支援語音與影像功能;S3 之 8 MB PSRAM 容納語音錄音緩衝。<b>教訓:S3 板須選板載 1 A 穩壓器之型號</b>(問題 I-01)</td></tr>
     <tr><td>MPU-6050 模組</td><td>姿態量測</td><td>六軸一體、I²C 介面、資源豐富,適合自寫姿態解算入門</td></tr>
     <tr><td>nRF24L01+ 模組</td><td>控制鏈路</td><td>相較 WiFi:延遲低且固定、協定簡單、支援 ACK payload 雙向傳輸,適合 50 Hz 即時控制</td></tr>
-    <tr><td>空心杯馬達 + MOSFET</td><td>動力</td><td>小型機架重量輕,空心杯免電調(ESC),以 MOSFET PWM 直驅降低成本與複雜度</td></tr>
+    <tr><td>無刷馬達 + ESC × 4</td><td>動力</td><td>ESP32Servo 輸出 250 Hz PWM 驅動 ESC(SimonK 韌體),支援 ESC 油門行程校準;初期規劃的空心杯 + MOSFET 直驅已不採用</td></tr>
     <tr><td>2.8" MSP2806 TFT(SPI ILI9341)</td><td>地面站顯示</td><td>SPI 介面僅需 6 隻 GPIO(並列式需 13+);LovyanGFX 支援中文字型</td></tr>
     <tr><td>INMP441 / MAX98357A</td><td>語音輸入 / 輸出</td><td>全數位 I²S 介面,避開板上類比雜訊;兩者可共用時脈線省腳位</td></tr>
     <tr><td>LD1117 穩壓器 + 100 µF</td><td>周邊獨立電源軌</td><td>1 A 容量、低壓差;與板載穩壓器分軌隔離射頻電流尖峰(§B.1)</td></tr>
@@ -147,7 +147,7 @@
     <tr><td>SPI 匯流排</td><td><code>18</code> / <code>19</code> / <code>23</code></td></tr>
     <tr><td>感測器匯流排</td><td>I²C SDA / SCL</td><td><code>21</code> / <code>22</code></td><td>100 kHz:MPU-6050、BMP280(0x76)、TCA9548A(0x70)、QMC5883(0x0D / 0x2C 自動偵測)</td></tr>
     <tr><td>衛星定位</td><td>UART2 RX / TX</td><td><code>33</code> / <code>32</code></td><td>NEO-6M @ 9600 bps</td></tr>
-    <tr><td rowspan="2">動力輸出</td><td>M1 前左(CW)/ M2 前右(CCW)</td><td><code>25</code> / <code>26</code></td><td rowspan="2">MOSFET PWM,X 型配置</td></tr>
+    <tr><td rowspan="2">動力輸出</td><td>M1 前左(CW)/ M2 前右(CCW)</td><td><code>25</code> / <code>26</code></td><td rowspan="2">ESC 250 Hz,X 型配置</td></tr>
     <tr><td>M3 後左(CCW)/ M4 後右(CW)</td><td><code>27</code> / <code>14</code></td></tr>
     <tr><td>電源監測</td><td>電池分壓 ADC</td><td><code>34</code></td><td>分壓比 4.0(30k + 10k)</td></tr>
   </table></div>

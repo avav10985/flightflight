@@ -21,3 +21,6 @@ secrets.h
 
 # 第三方參考專案 / 含敏感資料,不進版本控制
 不可上傳/
+
+# graphify 產生的知識圖(2MB 產物,本機重建即可)
+graphify-out/

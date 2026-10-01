@@ -47,7 +47,7 @@
     </div>
 
     <div class="arch-link">
-      <b>nRF24L01+</b><br>2.4 GHz CH 88<br>↓ Signal 12 B @ 50 Hz<br>↑ Telemetry 20 B<br>(ACK payload)
+      <b>nRF24L01+</b><br>2.4 GHz CH 88<br>↓ Signal 12 B @ 50 Hz<br>↑ Telemetry 32 B<br>(ACK payload)
     </div>
 
     <div class="arch-col col-drone">
@@ -57,7 +57,7 @@
       <div class="node" data-k="gps">NEO-6M GPS <small>UART・定位與導航</small></div>
       <div class="node" data-k="baro">BMP280 / VL53L0X ×4 <small>氣壓定高・雷射測距避障(硬體已就緒)</small></div>
       <div class="node" data-k="mag">QMC5883 磁力計 <small>絕對航向・抑制陀螺漂移</small></div>
-      <div class="node" data-k="motor">動力輸出 ×4 <small>MOSFET PWM・X 型混控</small></div>
+      <div class="node" data-k="motor">動力輸出 ×4 <small>ESC 250 Hz・X 型混控</small></div>
       <div class="node" data-k="cam">ESP32-CAM <small>獨立節點・WiFi 即時影像</small></div>
     </div>
   </div>
@@ -172,7 +172,7 @@
     <tr><td><code>paramVal</code></td><td>float</td><td>參數值(paramID ≠ 0 時有效)</td></tr>
   </table></div>
 
-  <h3>A.3.2 上行封包 Telemetry(飛行控制器 → 地面站,20 bytes)</h3>
+  <h3>A.3.2 上行封包 Telemetry(飛行控制器 → 地面站,32 bytes)</h3>
   <div class="table-scroll"><table>
     <tr><th>欄位</th><th>型別</th><th>說明</th></tr>
     <tr><td><code>roll / pitch</code></td><td>int16 × 2</td><td>姿態角 × 10(0.1° 解析度)</td></tr>
@@ -182,8 +182,9 @@
     <tr><td><code>status</code></td><td>uint8</td><td>位元旗標:armed / 校準中 / 校準失敗 / GPS fix</td></tr>
     <tr><td><code>satCount</code></td><td>uint8</td><td>GPS 可見衛星數</td></tr>
     <tr><td><code>lat_e7 / lon_e7</code></td><td>int32 × 2</td><td>經緯度 × 10⁷(約 1.1 cm 解析度)</td></tr>
+    <tr><td><code>kp_rp_m / ki_rp_m / kd_rp_m / kp_y_m / ki_y_m</code></td><td>int16 × 5</td><td>目前 PID × 1000,手把開機同步顯示 + 存檔確認(2026-06-18 加)</td></tr>
   </table></div>
-  <p>封包大小 20 bytes,符合 nRF24 ACK payload 上限(32 bytes)並保留擴充空間。失聯保護:訊號中斷超過 1 秒,飛行控制器立即解除武裝並將油門歸零(詳見飛控與校準章)。</p>
+  <p>資料 30 bytes,依 int32 對齊補到 32 bytes,<b>正好等於</b> nRF24 ACK payload 上限——已無擴充空間,再加欄位必須重新規劃封包;結構變動時飛行控制器與地面站必須成對重燒。失聯保護:訊號中斷超過 1 秒,飛行控制器立即解除武裝並將油門歸零(詳見飛控與校準章)。</p>
 </section>
 
 <div class="pager">
@@ -229,8 +230,8 @@ const ARCH_INFO = {
     "氣壓計提供相對高度估計(定高用);雷射測距經 TCA9548A I²C 多工器掛載四顆(近地高度 + 多方向避障)。硬體已全數安裝、驅動就緒,等待高度控制環與避障邏輯實作。", ""],
   mag: ["QMC5883 磁力計(GY-271)",
     "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
-  motor: ["動力輸出(空心杯馬達 × 4)",
-    "MOSFET PWM 直驅,X 型配置混控,輸出限幅 [1000, 2000]。",
+  motor: ["動力輸出(無刷馬達 × 4 + ESC)",
+    "ESP32Servo 驅動 ESC,更新率 250 Hz,X 型配置混控,輸出限幅 [1000, 2000] µs。",
     "調校紀錄:初始 PID 增益過高導致響應過於靈敏,經實飛測試降至保守值並限制最大傾角 20°。"],
   cam: ["ESP32-CAM 影像節點",
     "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援飛行中調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
