@@ -182,6 +182,8 @@ int           demoMotor = 0;        // 0=無,1~4=轉哪顆
 unsigned long demoUntil = 0;        // 自動停止時間
 unsigned long lastRxTime  = 0;
 unsigned long lastDbgTime = 0;
+uint32_t      loopCount   = 0;   // 迴圈計數,debugPrint 換算實測 Hz 用
+unsigned long lastHzTime  = 0;
 float         roll = 0, pitch = 0, yawRate = 0;
 int16_t       rawAx, rawAy, rawAz, rawGx, rawGy, rawGz;
 float         gyroOffsetX = 0, gyroOffsetY = 0, gyroOffsetZ = 0;
@@ -366,6 +368,13 @@ const char* navStateName(NavState s) {
     default:           return "????";
   }
 }
+
+// ---- 控制迴圈與 ESC 更新率(2026-09-07 加)----
+// 原本:ESC 50Hz(ESP32Servo 預設 REFRESH_CPS=50,我們從沒改過)+ 主迴圈自由跑。
+// 50Hz = 每 20ms 才修正一次姿態,加上週期會抖 → D 項品質差、姿態鬆散。
+// 現在兩者都鎖 250Hz(與 Brokking YMFC-AL 同級)。SimonK ESC 吃得下 400Hz。
+const int           ESC_HZ  = 250;
+const unsigned long LOOP_US = 1000000UL / ESC_HZ;   // 4000us
 
 const float I_LIMIT     = 100.0f;
 // 2026-06-09 從 30° 降到 15°:30° 太激進,輕推搖桿馬達就猛轉
@@ -1254,8 +1263,15 @@ void debugPrint() {
   if (millis() - lastDbgTime < 1000) return;
   lastDbgTime = millis();
 
-  Serial.printf("R%6.1f P%6.1f Yr%6.1f | M%02d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s",
-                roll, pitch, yawRate,
+  // 實測迴圈率:驗證 250Hz 節拍有沒有跟上。
+  // 明顯低於 250 = 某個工作吃掉太多時間(超過 4000us 預算)。
+  unsigned long nowMs  = millis();
+  float         loopHz = (nowMs > lastHzTime) ? loopCount * 1000.0f / (nowMs - lastHzTime) : 0;
+  loopCount  = 0;
+  lastHzTime = nowMs;
+
+  Serial.printf("%3.0fHz | R%6.1f P%6.1f Yr%6.1f | M%02d lock%d arm%d Thr%3d | Bat%.2fV | GPS sat%d %s",
+                loopHz, roll, pitch, yawRate,
                 data.mode, safetyReleased, armed, data.throttle, batteryV,
                 gps_sat, gps_fix ? "FIX" : "---");
 
@@ -1391,6 +1407,12 @@ void setup() {
     calibrateFull();
   }
 
+  // 2026-09-07 ESC 更新率 50Hz → 250Hz。必須在 attach() 之前呼叫才有效。
+  // ⚠️ 改過更新率後,ESC 油門行程校準要重做(esccal → esccalmin)。
+  esc1.setPeriodHertz(ESC_HZ);
+  esc2.setPeriodHertz(ESC_HZ);
+  esc3.setPeriodHertz(ESC_HZ);
+  esc4.setPeriodHertz(ESC_HZ);
   esc1.attach(PIN_ESC1, 1000, 2000);
   esc2.attach(PIN_ESC2, 1000, 2000);
   esc3.attach(PIN_ESC3, 1000, 2000);
@@ -1430,10 +1452,21 @@ void setup() {
                 Kp_rp, Ki_rp, Kd_rp, Kp_y, Ki_y);
 
   resetData();
+  lastHzTime = millis();   // 迴圈率基準點:setup 的校準阻塞不算進第一筆讀數
   Serial.println("=== Ready (LOCKED：先把模式開關切到 00 解鎖) ===\n");
 }
 
 void loop() {
+  // ---- 250Hz 節拍鎖(2026-09-07 加)----
+  // 迴圈順序刻意完全不動:writeMotors() 本來就排在 debugPrint()/parseSerial() 前面,
+  // 那些慢工作只佔用「下一輪開始前」的空檔,由這個閘門吸收掉。
+  // 單輪超時(例如校準阻塞 1.5 秒)時 while 條件立刻為假 → 自動追上,不會卡死。
+  // unsigned 減法對 micros() 的 71 分鐘溢位也是正確的。
+  static unsigned long loopTimer = 0;
+  while (micros() - loopTimer < LOOP_US);
+  loopTimer = micros();
+  loopCount++;
+
   recvData();
   failsafe();
   checkArm();

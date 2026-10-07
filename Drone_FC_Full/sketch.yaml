@@ -1,3 +1,6 @@
+# esp32 core 3.x 把板子 ID 從 lolin_d32 改成 d32,選項也砍剩 5 個
+# (沒有 huge_app / FlashSize / CPUFreq / FlashMode / LoopCore / EventsCore / JTAGAdapter / ZigbeeMode)。
+# no_ota = APP 2MB,目前 firmware 只用 394KB(18%),夠用。
 profiles:
   lolin_d32:
-    fqbn: esp32:esp32:lolin_d32:UploadSpeed=921600,FlashSize=4M,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,DebugLevel=none,LoopCore=1,EventsCore=0,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default
+    fqbn: esp32:esp32:d32:UploadSpeed=921600,PartitionScheme=no_ota,DebugLevel=none,EraseFlash=none
