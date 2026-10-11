@@ -99,7 +99,7 @@
 ├── 接線總表 / 程式說明        <span class="cm">設計文件(先行設計、實作後回寫)</span>
 └── make_*.py                  <span class="cm">設計圖產生腳本(Python)</span></div>
 
-  <h3>A.2.2 飛行控制器主迴圈(50 Hz)</h3>
+  <h3>A.2.2 飛行控制器主迴圈(250 Hz)</h3>
   <div class="diagram">
     <svg viewBox="0 0 900 120" font-family="'Noto Sans TC',sans-serif">
       <defs>
@@ -200,7 +200,7 @@
 <script>
 const ARCH_INFO = {
   s3: ["ESP32-S3 N16R8 — 地面站主控制器",
-    "雙核心 Xtensa LX7 @ 240 MHz、16 MB Flash、8 MB Octal PSRAM。負責 50 Hz 控制迴圈(搖桿取樣 → 封包發送 → 遙測接收)、TFT 介面繪製,以及 Mode 10 之音訊擷取與雲端通訊。PSRAM 用於語音錄音緩衝(10 秒 @ 16 kHz ≈ 320 KB)。",
+    "雙核心 Xtensa LX7 @ 240 MHz、16 MB Flash、8 MB Octal PSRAM。負責 50 Hz 控制迴圈(搖桿取樣 → 封包發送 → 遙測接收)、TFT 介面繪製,以及 Mode 10 之音訊擷取與雲端通訊。PSRAM 用於語音錄音緩衝(上限 8 秒 @ 16 kHz / 16-bit ≈ 256 KB)。",
     "選型備註:初版採用之低價 S3 模組板載穩壓器僅約 300 mA,無法支撐 WiFi 工作,經對照實驗確認後更換為 1 A 穩壓器板型(問題 I-01)。"],
   tft: ["TFT 顯示器(ILI9341,240×320)",
     "SPI @ 40 MHz,LovyanGFX 驅動,內嵌中文字型。顯示飛行姿態、高度、航向、GPS 狀態、模式與 PID 調參選單。因電源互斥限制,序列埠於整合測試時不可用,本顯示器為唯一執行期輸出通道。",
@@ -209,7 +209,7 @@ const ARCH_INFO = {
     "雙軸搖桿 × 2(ADC 取樣;油門軸移除回中彈簧以保持油門位置)、三段開關 × 2(模式編碼)、肩鈕 × 2(左肩鈕兼語音 PTT)、選單鍵。",
     "實作備註:搖桿兩軸之電氣方向與操作直覺相反,於韌體端統一反相校正。"],
   mic: ["INMP441 I²S MEMS 麥克風",
-    "全數位 I²S 介面輸出,16 kHz / 16-bit 單聲道取樣,直接寫入 PSRAM。數位介面可避開手把上 TFT、nRF24 與電源切換產生之類比雜訊。",
+    "全數位 I²S 介面輸出,以 32 kHz 取樣(與播放端共用 I²S 時脈),2:1 降採樣為 16 kHz / 16-bit 單聲道後寫入 PSRAM。數位介面可避開手把上 TFT、nRF24 與電源切換產生之類比雜訊。",
     "與擴大機共用 I²S BCLK / WS 時脈線(GPIO 11 / 12),資料線各自獨立(DIN 14 / DOUT 13)。"],
   spk: ["MAX98357A I²S Class-D 擴大機",
     "預留語音回覆(TTS)輸出。shutdown 腳(GPIO 18)於開機即拉低靜音,僅於播放時致能,消除 I²S 時脈串擾被放大之雜訊(問題 I-04)。", ""],
@@ -232,9 +232,9 @@ const ARCH_INFO = {
     "提供絕對航向參考。韌體自動偵測三種常見晶片變體(HMC5883L 0x1E / QMC5883 0x0D / QMC5883P 0x2C)。偏航軸互補濾波以其讀值抑制陀螺積分漂移,為 GPS 導航之航向基準。", ""],
   motor: ["動力輸出(無刷馬達 × 4 + ESC)",
     "ESP32Servo 驅動 ESC,更新率 250 Hz,X 型配置混控,輸出限幅 [1000, 2000] µs。",
-    "調校紀錄:初始 PID 增益過高導致響應過於靈敏,經實飛測試降至保守值並限制最大傾角 20°。"],
+    "調校紀錄:初始 PID 增益過高,地面測試時輕推搖桿馬達即猛轉,已降至保守值並將最大傾角限制為 20°;穩定飛行調校進行中,尚未自由飛行。"],
   cam: ["ESP32-CAM 影像節點",
-    "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援飛行中調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
+    "獨立第三 MCU,WiFi MJPEG 即時串流,固定 IP + mDNS 便於連線,支援即時調整畫質。規劃與手機頭部追蹤雲台整合。", ""]
 };
 document.querySelectorAll(".node").forEach(n => {
   n.addEventListener("click", () => {

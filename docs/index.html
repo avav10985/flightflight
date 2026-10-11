@@ -48,16 +48,16 @@
 
 <section>
   <h2><span class="no">2.</span>作品功能</h2>
-  <p>本作品為一套可實際飛行之四軸無人機與其地面控制系統,所有功能均為自行設計實作:</p>
+  <p>本作品為一套自製四軸無人機與其地面控制系統,所有功能均為自行設計實作;目前處於地面測試與 PID 調校階段,尚未自由飛行:</p>
   <div class="table-scroll"><table>
     <tr><th>功能</th><th>說明</th><th>狀態</th></tr>
-    <tr><td><b>姿態自穩飛行</b></td><td>自寫飛控:互補濾波姿態估計 + 三軸 PID 閉環控制,搖桿放開自動回水平。PID 控制原理參考 <a class="cite" href="testing.html#refs">[4]</a></td><td class="st-done">可飛行</td></tr>
+    <tr><td><b>姿態自穩飛行</b></td><td>自寫飛控:互補濾波姿態估計 + 三軸 PID 閉環控制,搖桿放開自動回水平。PID 控制原理參考 <a class="cite" href="testing.html#refs">[4]</a></td><td class="st-part">程式完成,調校中</td></tr>
     <tr><td><b>無線遙控與遙測</b></td><td>nRF24 2.4 GHz 雙向鏈路:50 Hz 指令下行,姿態 / 高度 / 航向 / GPS 即時回傳並顯示於手把彩色螢幕</td><td class="st-done">已完成</td></tr>
-    <tr><td><b>線上 PID 調參與遠端校準</b></td><td>飛行中透過手把選單即時調整控制增益、遠端觸發 IMU 校準,結果斷電保存</td><td class="st-done">已完成</td></tr>
+    <tr><td><b>線上 PID 調參與遠端校準</b></td><td>透過手把選單即時調整控制增益、遠端觸發 IMU 校準,結果斷電保存</td><td class="st-done">已完成</td></tr>
     <tr><td><b>AI 語音控制與回應</b></td><td>對手把說「轉一號馬達」:雲端語音辨識 + LLM 解析 → 飛機馬達動作,喇叭以合成語音回覆「轉一號馬達」。語音管線跑於第二核心,50 Hz 控制不中斷。設計參考 ESP32 語音助理相關作品 <a class="cite" href="testing.html#refs">[1][2][3]</a></td><td class="st-done">單馬達展示可用</td></tr>
     <tr><td><b>媒體播放(Mode 12)</b></td><td>地面站獨立媒體模式:SD 卡影片(MJPEG 15fps,聲音時鐘同步)與音樂播放,含選單、音量、暫停控制</td><td class="st-done">已完成</td></tr>
     <tr><td><b>GPS 定點導航</b></td><td>自動飛向指定座標:導航計算與狀態機完成,待接入控制環</td><td class="st-part">部分完成</td></tr>
-    <tr><td><b>第一人稱即時影像</b></td><td>機載 ESP32-CAM WiFi 串流,飛行中可調畫質;頭部追蹤雲台原型已驗證</td><td class="st-done">已完成</td></tr>
+    <tr><td><b>第一人稱即時影像</b></td><td>機載 ESP32-CAM WiFi 串流,可調畫質;頭部追蹤雲台原型已驗證</td><td class="st-done">已完成</td></tr>
     <tr><td><b>多層飛行安全機制</b></td><td>開機鎖定、模式白名單、油門武裝條件、1 秒失聯自動斷電</td><td class="st-done">已完成</td></tr>
   </table></div>
 </section>
@@ -85,7 +85,7 @@
     <tr><td>主控制器</td><td><b>ESP32-S3 N16R8</b>(雙核心 LX7 @ 240 MHz,16 MB Flash,8 MB Octal PSRAM)</td></tr>
     <tr><td>顯示器</td><td>2.8" TFT <b>MSP2806(ILI9341)</b> 240×320(SPI @ 40 MHz,LovyanGFX,中文字型)</td></tr>
     <tr><td>操縱輸入</td><td>雙軸搖桿 × 2(油門軸移除回中彈簧)、三段開關 × 2、肩鈕 × 2、選單鍵</td></tr>
-    <tr><td>語音輸入</td><td><b>INMP441</b> I²S MEMS 麥克風(16 kHz / 16-bit / 單聲道)</td></tr>
+    <tr><td>語音輸入</td><td><b>INMP441</b> I²S MEMS 麥克風(32 kHz 取樣,降為 16 kHz / 16-bit / 單聲道上傳)</td></tr>
     <tr><td>語音輸出</td><td><b>MAX98357A</b> I²S Class-D 擴大機(預留 TTS 語音回覆)</td></tr>
     <tr><td>資料儲存</td><td>microSD(SPI,與 TFT / nRF24 共匯流排)</td></tr>
     <tr><td>電源</td><td>2S 鋰電池 → 降壓模組 5 V → 雙 LDO 分軌(詳見硬體設計章)</td></tr>
