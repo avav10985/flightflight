@@ -21,7 +21,7 @@
   <div class="cover-text">
     <div class="doc-type">TECHNICAL REPORT</div>
     <h1>四軸無人機飛行控制系統<br>設計與實作技術報告</h1>
-    <div class="subtitle">自製飛行控制器、無線地面站與雲端 AI 語音控制之整合系統</div>
+    <div class="subtitle">自製飛行控制器、無線地面站與雲端 AI 語音辨識之整合系統</div>
     <div class="meta">
       <div><b>文件版本</b>v1.1</div>
       <div><b>日期</b>2026 年 6 月</div>
@@ -41,7 +41,7 @@
   <ul>
     <li><b>飛行控制器</b>:以 ESP32 為核心,自行實作慣性量測融合(互補濾波)、三軸 PID 姿態控制、X 型四馬達混控,並整合 GPS、氣壓計、磁力計與雷射測距感測器。</li>
     <li><b>地面站(手把)</b>:以 ESP32-S3 為核心,2.8 吋彩色 TFT 全中文操作介面,雙搖桿 + 9 種飛行模式,經 nRF24L01+ 與飛行控制器進行 50 Hz 雙向通訊(指令下行 / 遙測上行),支援線上 PID 調參與遠端校準。</li>
-    <li><b>AI 語音控制子系統(Mode 10)</b>:地面站內建 I²S 麥克風,按住肩鈕錄音後經 WiFi 上傳雲端,以 Whisper 模型進行中文語音辨識,再由大型語言模型解析為結構化飛行指令(JSON),全程延遲約 3 秒。</li>
+    <li><b>AI 語音控制子系統(Mode 10)</b>:地面站內建 I²S 麥克風,按住肩鈕錄音後經 WiFi 上傳雲端,以 Whisper 模型進行中文語音辨識,再由大型語言模型解析為結構化飛行指令(JSON),全程延遲約 3 秒。目前完成辨識與解析,以語音實際操控飛機尚未成功。</li>
   </ul>
   <p>開發過程採對照實驗方法定位多項系統級問題,包括穩壓器容量不足導致之 WiFi 欠壓重啟、SPI 匯流排佔用衝突、射頻發射電流尖峰等,並完成雙穩壓器電源架構之重新設計。本報告依主題分章,記錄系統之完整技術規格、設計決策與驗證結果。</p>
 </section>
@@ -54,7 +54,7 @@
     <tr><td><b>姿態自穩飛行</b></td><td>自寫飛控:互補濾波姿態估計 + 三軸 PID 閉環控制,搖桿放開自動回水平。PID 控制原理參考 <a class="cite" href="testing.html#refs">[4]</a></td><td class="st-part">程式完成,調校中</td></tr>
     <tr><td><b>無線遙控與遙測</b></td><td>nRF24 2.4 GHz 雙向鏈路:50 Hz 指令下行,姿態 / 高度 / 航向 / GPS 即時回傳並顯示於手把彩色螢幕</td><td class="st-done">已完成</td></tr>
     <tr><td><b>線上 PID 調參與遠端校準</b></td><td>透過手把選單即時調整控制增益、遠端觸發 IMU 校準,結果斷電保存</td><td class="st-done">已完成</td></tr>
-    <tr><td><b>AI 語音控制與回應</b></td><td>對手把說「轉一號馬達」:雲端語音辨識 + LLM 解析 → 飛機馬達動作,喇叭以合成語音回覆「轉一號馬達」。語音管線跑於第二核心,50 Hz 控制不中斷。設計參考 ESP32 語音助理相關作品 <a class="cite" href="testing.html#refs">[1][2][3]</a></td><td class="st-done">單馬達展示可用</td></tr>
+    <tr><td><b>AI 語音辨識與回應</b></td><td>對手把說「轉一號馬達」:雲端語音辨識 + LLM 解析為結構化指令,喇叭以合成語音回覆確認。語音管線設計於第二核心執行。以語音實際操控飛機尚未成功。設計參考 ESP32 語音助理相關作品 <a class="cite" href="testing.html#refs">[1][2][3]</a></td><td class="st-part">辨識完成,操控未成功</td></tr>
     <tr><td><b>媒體播放(Mode 12)</b></td><td>地面站獨立媒體模式:SD 卡影片(MJPEG 15fps,聲音時鐘同步)與音樂播放,含選單、音量、暫停控制</td><td class="st-done">已完成</td></tr>
     <tr><td><b>GPS 定點導航</b></td><td>自動飛向指定座標:導航計算與狀態機完成,待接入控制環</td><td class="st-part">部分完成</td></tr>
     <tr><td><b>第一人稱即時影像</b></td><td>機載 ESP32-CAM WiFi 串流,可調畫質;頭部追蹤雲台原型已驗證</td><td class="st-done">已完成</td></tr>
